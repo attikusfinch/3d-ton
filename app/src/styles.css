@@ -415,6 +415,11 @@ div[class*='tc-'] {
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring), transparent 78%);
 }
 
+.pro-seed-input {
+  min-height: 72px;
+  resize: vertical;
+}
+
 .mesh-stats {
   display: grid;
   grid-template-columns: 1fr 1fr;

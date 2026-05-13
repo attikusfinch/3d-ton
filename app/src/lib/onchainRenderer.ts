@@ -2,15 +2,19 @@ import {
   Address,
   beginCell,
   Dictionary,
+  internal,
   Sender,
+  SendMode,
   storeStateInit,
   toNano,
-  type Cell,
+  Cell,
   type SenderArguments,
   type StateInit,
 } from '@ton/core';
+import { mnemonicToPrivateKey, mnemonicValidate } from '@ton/crypto';
 import type { TonConnectUI } from '@tonconnect/ui-react';
 import type { Feature, Wallet } from '@tonconnect/ui-react';
+import { WalletContractV5R1 } from '@ton/ton';
 
 import {
   Camera,
@@ -44,6 +48,7 @@ export const DEFAULT_RENDER_POINTS = 64;
 export const DEPLOY_MESSAGE_VALUE = toNano('0.05');
 export const PAYLOAD_MESSAGE_VALUE = toNano('0.01');
 export const TONCONNECT_SAFE_BATCH_MESSAGES = 64;
+export const PRO_WALLET_MAX_MESSAGES = 255;
 export const DEFAULT_DEPLOY_SEED = 1;
 export const MAX_DEPLOY_SEED = 0xffffffff;
 
@@ -80,6 +85,21 @@ export interface UploadProgress {
   done: number;
   total: number;
   label: string;
+}
+
+export interface ProWalletContext {
+  address: Address;
+  sendMessages: (
+    messages: ProWalletMessage[],
+    onProgress: (progress: UploadProgress) => void,
+  ) => Promise<void>;
+}
+
+export interface ProWalletMessage {
+  to: Address;
+  value: bigint;
+  body?: Cell;
+  init?: StateInit;
 }
 
 interface EncodedPayload {
@@ -135,6 +155,84 @@ export function createTonConnectSender(
       });
     },
   };
+}
+
+export async function createProWalletContext(
+  mnemonicText: string,
+  network: Network,
+): Promise<ProWalletContext> {
+  const mnemonic = parseMnemonic(mnemonicText);
+  if (!(await mnemonicValidate(mnemonic))) {
+    throw new Error('Invalid PRO seed phrase.');
+  }
+
+  const keyPair = await mnemonicToPrivateKey(mnemonic);
+  const wallet = WalletContractV5R1.create({
+    workchain: 0,
+    publicKey: keyPair.publicKey,
+  });
+  const opened = getTonClient(network).open(wallet);
+
+  return {
+    address: wallet.address,
+    sendMessages: async (messages, onProgress) => {
+      const batches = chunkProWalletMessages(messages);
+      for (let i = 0; i < batches.length; i += 1) {
+        const batch = batches[i]!;
+        const batchNumber = i + 1;
+        onProgress({
+          done: batchNumber - 1,
+          total: batches.length,
+          label: `PRO signing batch ${batchNumber}/${batches.length} (${batch.length} messages)`,
+        });
+
+        const seqno = await opened.getSeqno();
+        await opened.sendTransfer({
+          seqno,
+          secretKey: keyPair.secretKey,
+          sendMode: SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,
+          messages: batch.map((message) =>
+            internal({
+              to: message.to,
+              value: message.value,
+              body: message.body,
+              init: message.init,
+              bounce: true,
+            }),
+          ),
+        });
+        await waitForSeqno(opened, seqno + 1);
+
+        onProgress({
+          done: batchNumber,
+          total: batches.length,
+          label: `PRO batch ${batchNumber}/${batches.length} confirmed`,
+        });
+      }
+    },
+  };
+}
+
+export function buildDeployMessage(
+  contract: OnchainRenderer,
+): ProWalletMessage {
+  return {
+    to: contract.address,
+    value: DEPLOY_MESSAGE_VALUE,
+    body: Cell.EMPTY,
+    init: contract.init,
+  };
+}
+
+export function buildUploadMessages(
+  contractAddress: Address,
+  payloads: Cell[],
+): ProWalletMessage[] {
+  return payloads.map((body) => ({
+    to: contractAddress,
+    value: PAYLOAD_MESSAGE_VALUE,
+    body,
+  }));
 }
 
 export async function sendRendererPayloads(
@@ -647,6 +745,34 @@ function extractSendTransactionLimits(
 function getOptionalFeatures(wallet: Wallet): Feature[] | undefined {
   const value = (wallet as { features?: unknown }).features;
   return Array.isArray(value) ? (value as Feature[]) : undefined;
+}
+
+function parseMnemonic(value: string): string[] {
+  return value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function chunkProWalletMessages(messages: ProWalletMessage[]) {
+  const batches: ProWalletMessage[][] = [];
+  for (let i = 0; i < messages.length; i += PRO_WALLET_MAX_MESSAGES) {
+    batches.push(messages.slice(i, i + PRO_WALLET_MAX_MESSAGES));
+  }
+  return batches;
+}
+
+async function waitForSeqno(
+  wallet: { getSeqno: () => Promise<number> },
+  nextSeqno: number,
+) {
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    if ((await wallet.getSeqno()) >= nextSeqno) return;
+    await sleep(2500);
+  }
+  throw new Error('PRO wallet transaction was sent, but seqno did not update.');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function clampMessageBatchSize(value: number): number {

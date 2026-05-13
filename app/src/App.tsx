@@ -45,9 +45,12 @@ import {
   type RenderPointBatch,
 } from './lib/mesh';
 import {
+  buildDeployMessage,
+  buildUploadMessages,
   buildUploadPayloads,
   buildSetCameraPayload,
   CAMERA_VIEWS,
+  createProWalletContext,
   createRendererContract,
   createTonConnectSender,
   DEFAULT_CAMERA_VIEW,
@@ -128,6 +131,7 @@ export default function App() {
   const [cameraViewId, setCameraViewId] = useState(DEFAULT_CAMERA_VIEW.id);
   const [deploySeed, setDeploySeed] = useState(makeDeploySeed);
   const [localMeshUploaded, setLocalMeshUploaded] = useState(false);
+  const [proSeed, setProSeed] = useState('');
 
   const formattedWallet = useMemo(() => {
     if (!walletAddress) return '';
@@ -248,6 +252,29 @@ export default function App() {
     });
   }
 
+  async function handleProDeploy() {
+    await runTask('PRO deploying scene', async () => {
+      const proWallet = await createProWalletContext(proSeed, network);
+      const seed = normalizeDeploySeed(deploySeed);
+      setDeploySeed(seed);
+      const contract = createRendererContract(
+        proWallet.address,
+        resolution,
+        seed,
+      );
+      setProgress({ done: 0, total: 1, label: 'PRO deploy' });
+      await proWallet.sendMessages([buildDeployMessage(contract)], setProgress);
+      setContractAddress(
+        contract.address.toString({
+          bounceable: true,
+          testOnly: network === 'testnet',
+        }),
+      );
+      setLocalMeshUploaded(false);
+      setStatus(`PRO scene deployed with seed ${seed}`);
+    });
+  }
+
   async function handleSample() {
     await runTask('Compiling sample', async () => {
       const compiled = await compileObjToMesh(
@@ -320,6 +347,33 @@ export default function App() {
       );
       setLocalMeshUploaded(true);
       setStatus('Mesh committed on-chain');
+    });
+  }
+
+  async function handleProUpload() {
+    await runTask('PRO uploading mesh', async () => {
+      if (!mesh) throw new Error('Compile an OBJ first.');
+      if (optimizingMesh) throw new Error('Wait for camera optimization.');
+      if (!contractAddress.trim())
+        throw new Error('Deploy or paste a contract address.');
+
+      const address = Address.parse(contractAddress.trim());
+      const proWallet = await createProWalletContext(proSeed, network);
+      const payloads = buildUploadPayloads(
+        mesh,
+        resolution,
+        texture,
+        cameraView,
+      );
+      const messages = buildUploadMessages(address, payloads);
+      setProgress({
+        done: 0,
+        total: Math.ceil(messages.length / 255),
+        label: `PRO preparing ${messages.length} messages`,
+      });
+      await proWallet.sendMessages(messages, setProgress);
+      setLocalMeshUploaded(true);
+      setStatus('Mesh committed on-chain by PRO wallet');
     });
   }
 
@@ -626,6 +680,39 @@ export default function App() {
           </div>
 
           <div className="panel-block">
+            <p className="panel-label">PRO</p>
+            <label className="field-label" htmlFor="pro-seed">
+              Burner seed
+            </label>
+            <textarea
+              id="pro-seed"
+              className="text-input pro-seed-input"
+              value={proSeed}
+              onChange={(event) => setProSeed(event.target.value)}
+              placeholder="24 words"
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <div className="button-row">
+              <Button
+                variant="secondary"
+                onClick={handleProDeploy}
+                disabled={busy || !proSeed.trim()}
+              >
+                <Rocket className="size-4" />
+                PRO Deploy
+              </Button>
+              <Button
+                onClick={handleProUpload}
+                disabled={busy || !mesh || optimizingMesh || !proSeed.trim()}
+              >
+                <Wallet className="size-4" />
+                PRO Upload
+              </Button>
+            </div>
+          </div>
+
+          <div className="panel-block">
             <p className="panel-label">Mesh</p>
             <input
               ref={fileInputRef}
@@ -840,6 +927,7 @@ export default function App() {
                 setRenderedAt('');
                 setDeploySeed(makeDeploySeed());
                 setLocalMeshUploaded(false);
+                setProSeed('');
                 setStatus('Idle');
                 paintEmptyCanvas(canvasRef.current, resolution);
               }}
