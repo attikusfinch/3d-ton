@@ -19,7 +19,7 @@ const texturePath =
 const canvasSize = Number(process.env.CANVAS_SIZE ?? 512);
 const maxVertices = Number(process.env.MAX_VERTICES ?? 100000);
 const maxFaces = Number(process.env.MAX_FACES ?? 4096);
-const shardFaces = Number(process.env.SHARD_FACES ?? 16);
+const shardFaces = Number(process.env.SHARD_FACES ?? 4096);
 const renderFaces = Number(process.env.RENDER_FACES ?? maxFaces);
 const maxPatchPixels = Number(process.env.MAX_PATCH_PIXELS ?? 4096);
 const useTexture = process.env.USE_TEXTURE !== '0';
@@ -55,12 +55,23 @@ let renderedFaces = 0;
 let renderCalls = 0;
 let skippedOffscreen = 0;
 let skippedTooLarge = 0;
+let textureChunksUploaded = 0;
 
 for (const shard of shards) {
   if (renderedFaces >= renderFaces) break;
+  const textureSelection = texture
+    ? meshModule.selectTextureChunksForShard(texture, shard)
+    : null;
+  textureChunksUploaded += textureSelection?.chunks.length ?? 0;
 
   const initialContract = wrapper.OnchainRendererShard.fromStorage(
-    defaultShardStorage(wrapper, deployer.address, shard, texture, camera),
+    defaultShardStorage(
+      wrapper,
+      deployer.address,
+      shard,
+      textureSelection,
+      camera,
+    ),
   );
   const smartContract = await blockchain.getContract(initialContract.address);
   smartContract.account = createShardAccount({
@@ -127,7 +138,11 @@ console.log(
       renderCalls,
       skippedOffscreen,
       skippedTooLarge,
-      textureChunks: texture?.chunks.length ?? 0,
+      textureChunksPerAtlas: texture?.chunks.length ?? 0,
+      textureChunksUploaded,
+      textureChunkUploadReduction: texture
+        ? `${textureChunksUploaded}/${(texture.chunks.length ?? 0) * Math.min(shards.length, Math.ceil(renderFaces / shardFaces))}`
+        : null,
       camera,
     },
     null,
@@ -197,8 +212,8 @@ function defaultShardStorage(wrapper, owner, shard, texture, camera) {
   shard.faceUvChunks.forEach((chunk, index) => {
     faceUvChunks.set(BigInt(index), chunk);
   });
-  texture?.chunks.forEach((chunk, index) => {
-    textureChunks.set(BigInt(index), chunk);
+  texture?.chunks.forEach(({ index, data }) => {
+    textureChunks.set(BigInt(index), data);
   });
 
   return {
@@ -239,7 +254,7 @@ function defaultShardStorage(wrapper, owner, shard, texture, camera) {
         textureHash: texture?.textureHash ?? 0n,
         faceUvChunkTotal: BigInt(shard.faceUvChunks.length),
         faceUvChunksUploaded: BigInt(shard.faceUvChunks.length),
-        textureChunkTotal: BigInt(texture?.chunks.length ?? 0),
+        textureChunkTotal: BigInt(texture?.totalChunks ?? 0),
         textureChunksUploaded: BigInt(texture?.chunks.length ?? 0),
         faceUvChunks,
         textureChunks,

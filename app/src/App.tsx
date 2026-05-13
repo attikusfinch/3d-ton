@@ -43,7 +43,7 @@ import {
   DEFAULT_MAX_VERTICES,
   DEFAULT_RENDER_POINTS,
   DEFAULT_RENDER_ROWS,
-  MESSAGE_VALUE,
+  DEPLOY_MESSAGE_VALUE,
   getWalletMessageBatchSize,
   openRenderer,
   sendRendererPayloads,
@@ -135,7 +135,7 @@ export default function App() {
       );
       const opened = getTonClient(network).open(contract);
 
-      await opened.sendDeploy(sender, MESSAGE_VALUE);
+      await opened.sendDeploy(sender, DEPLOY_MESSAGE_VALUE);
       const address = contract.address.toString({
         bounceable: true,
         testOnly: network === 'testnet',

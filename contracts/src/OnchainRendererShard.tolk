@@ -175,13 +175,12 @@ fun onInternalMessage(in: InMessage) {
             var assets = storage.assets.load();
             assertOwner(in.senderAddress, storage.owner);
             assertTextureLimits(msg.width, msg.height);
-            assertUploaded(
-                assets.textureChunksUploaded,
-                ceilDiv(
-                    msg.width * msg.height * TEXTURE_BYTES_PER_TEXEL,
-                    TEXTURE_BYTES_PER_CHUNK,
-                ),
+            val expectedChunks = ceilDiv(
+                msg.width * msg.height * TEXTURE_BYTES_PER_TEXEL,
+                TEXTURE_BYTES_PER_CHUNK,
             );
+            assert (assets.textureChunkTotal == expectedChunks) throw Errors.InvalidCommit;
+            assert (assets.textureChunksUploaded > 0) throw Errors.InvalidCommit;
 
             assets.textureWidth = msg.width;
             assets.textureHeight = msg.height;

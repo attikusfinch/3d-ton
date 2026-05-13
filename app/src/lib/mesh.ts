@@ -45,6 +45,21 @@ export interface CompiledTexture {
   format: 'rgb565';
 }
 
+export interface TextureChunkRef {
+  index: number;
+  data: Cell;
+}
+
+export interface TextureChunkSelection {
+  width: number;
+  height: number;
+  textureHash: bigint;
+  sourceName: string;
+  format: 'rgb565';
+  totalChunks: number;
+  chunks: TextureChunkRef[];
+}
+
 export interface CompiledMeshShard {
   shardIndex: number;
   sourceFaceIndices: number[];
@@ -414,6 +429,83 @@ export function rgb565ToRgb(value: number): [number, number, number] {
     Math.round((g * 255) / 63),
     Math.round((b * 255) / 31),
   ];
+}
+
+export function selectTextureChunksForShard(
+  texture: CompiledTexture,
+  shard: CompiledMeshShard,
+): TextureChunkSelection {
+  const indices = new Set<number>();
+
+  for (const uv of shard.faceUvs) {
+    for (const index of textureChunkIndicesForFaceUv(
+      uv,
+      texture.width,
+      texture.height,
+    )) {
+      indices.add(index);
+    }
+  }
+
+  return {
+    width: texture.width,
+    height: texture.height,
+    textureHash: texture.textureHash,
+    sourceName: texture.sourceName,
+    format: texture.format,
+    totalChunks: texture.chunks.length,
+    chunks: [...indices]
+      .sort((a, b) => a - b)
+      .map((index) => ({ index, data: texture.chunks[index]! })),
+  };
+}
+
+function textureChunkIndicesForFaceUv(
+  uv: MeshFaceUv,
+  width: number,
+  height: number,
+): number[] {
+  const xs = [
+    uvByteToTexel(uv.u0, width),
+    uvByteToTexel(uv.u1, width),
+    uvByteToTexel(uv.u2, width),
+  ];
+  const ys = [
+    uvByteToTexel(uv.v0, height),
+    uvByteToTexel(uv.v1, height),
+    uvByteToTexel(uv.v2, height),
+  ];
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const maxByteOffset = width * height * TEXTURE_BYTES_PER_TEXEL - 1;
+  const indices = new Set<number>();
+
+  for (let y = minY; y <= maxY; y += 1) {
+    const rowStart = (y * width + minX) * TEXTURE_BYTES_PER_TEXEL;
+    const rowEnd = Math.min(
+      maxByteOffset,
+      (y * width + maxX) * TEXTURE_BYTES_PER_TEXEL +
+        TEXTURE_BYTES_PER_TEXEL -
+        1,
+    );
+    const startChunk = textureChunkIndexForByteOffset(rowStart);
+    const endChunk = textureChunkIndexForByteOffset(rowEnd);
+    for (let index = startChunk; index <= endChunk; index += 1) {
+      indices.add(index);
+    }
+  }
+
+  return [...indices];
+}
+
+function uvByteToTexel(value: number, size: number): number {
+  return Math.min(size - 1, Math.floor((clampByte(value) * size) / 256));
+}
+
+function textureChunkIndexForByteOffset(byteOffset: number): number {
+  return Math.floor(byteOffset / TEXTURE_BYTES_PER_CHUNK);
 }
 
 export function decodeRenderCell(cell: Cell): RenderBand {

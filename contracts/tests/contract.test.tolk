@@ -42,7 +42,7 @@ get fun `test owner uploads chunks and commits model`() {
         1,
         0x01,
         0x02,
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(res).toHaveSuccessfulTx<CommitModel>({
         from: deployer.address,
@@ -106,7 +106,7 @@ get fun `test shard renders filled face patch`() {
         1,
         0x31,
         0x32,
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(commit).toHaveSuccessfulTx<CommitModel>({
         from: deployer.address,
@@ -134,7 +134,7 @@ get fun `test texture chunks can be committed`() {
         0,
         1,
         texture2x2(),
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(upload).toHaveSuccessfulTx<UploadTextureChunk>({
         from: deployer.address,
@@ -146,7 +146,7 @@ get fun `test texture chunks can be committed`() {
         2,
         2,
         0x03,
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(commit).toHaveSuccessfulTx<CommitTexture>({
         from: deployer.address,
@@ -169,7 +169,7 @@ get fun `test 128x128 rgb565 texture chunks can be committed`() {
         128,
         128,
         0x04,
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(commit).toHaveSuccessfulTx<CommitTexture>({
         from: deployer.address,
@@ -183,6 +183,40 @@ get fun `test 128x128 rgb565 texture chunks can be committed`() {
     expect(committed).toEqual(true);
 }
 
+get fun `test sparse rgb565 texture chunks can be committed`() {
+    val (contract, deployer, _) = setupTest();
+
+    val upload = contract.sendUploadTextureChunk(
+        deployer.address,
+        42,
+        274,
+        textureChunk(42, 274, 32768),
+        { value: ton("0.01") },
+    );
+    expect(upload).toHaveSuccessfulTx<UploadTextureChunk>({
+        from: deployer.address,
+        to: contract.address,
+    });
+
+    val commit = contract.sendCommitTexture(
+        deployer.address,
+        128,
+        128,
+        0x05,
+        { value: ton("0.01") },
+    );
+    expect(commit).toHaveSuccessfulTx<CommitTexture>({
+        from: deployer.address,
+        to: contract.address,
+    });
+
+    val (width, height, hash, committed) = contract.textureInfo();
+    expect(width).toEqual(128);
+    expect(height).toEqual(128);
+    expect(hash).toEqual(0x05);
+    expect(committed).toEqual(true);
+}
+
 get fun `test counted chunks commit large point model`() {
     val (contract, deployer, _) = setupTest();
 
@@ -193,7 +227,7 @@ get fun `test counted chunks commit large point model`() {
         0,
         0x10,
         0x20,
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(res).toHaveSuccessfulTx<CommitModel>({
         from: deployer.address,
@@ -224,7 +258,7 @@ get fun `test commit rejects incomplete high-capacity upload`() {
         0,
         6250,
         vertexChunk(0),
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(upload).toHaveSuccessfulTx<UploadVertexChunk>({
         from: deployer.address,
@@ -237,7 +271,7 @@ get fun `test commit rejects incomplete high-capacity upload`() {
         0,
         0x11,
         0x22,
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(commit).toHaveFailedTx({
         from: deployer.address,
@@ -254,7 +288,7 @@ get fun `test invalid chunks are rejected`() {
         0,
         1,
         beginCell().storeUint(1, 7).endCell(),
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(res).toHaveFailedTx({
         from: deployer.address,
@@ -271,7 +305,7 @@ get fun `test non-owner cannot mutate model`() {
         0,
         1,
         triangleVertices(),
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(res).toHaveFailedTx({
         from: notDeployer.address,
@@ -302,7 +336,7 @@ fun setupCommittedTriangle(): (OnchainRenderer, Treasury, Treasury) {
         1,
         0x01,
         0x02,
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(res).toHaveSuccessfulTx<CommitModel>({
         from: deployer.address,
@@ -317,7 +351,7 @@ fun uploadTriangle(contract: OnchainRenderer, deployer: Treasury) {
         0,
         1,
         triangleVertices(),
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(verticesRes).toHaveSuccessfulTx<UploadVertexChunk>({
         from: deployer.address,
@@ -329,7 +363,7 @@ fun uploadTriangle(contract: OnchainRenderer, deployer: Treasury) {
         0,
         1,
         triangleFaces(),
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(facesRes).toHaveSuccessfulTx<UploadFaceChunk>({
         from: deployer.address,
@@ -341,7 +375,7 @@ fun uploadTriangle(contract: OnchainRenderer, deployer: Treasury) {
         0,
         1,
         triangleUvs(),
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(uvsRes).toHaveSuccessfulTx<UploadFaceUvChunk>({
         from: deployer.address,
@@ -355,7 +389,7 @@ fun uploadTriangleShard(contract: OnchainRendererShard, deployer: Treasury) {
         0,
         1,
         triangleVertices(),
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(verticesRes).toHaveSuccessfulTx<UploadVertexChunk>({
         from: deployer.address,
@@ -367,7 +401,7 @@ fun uploadTriangleShard(contract: OnchainRendererShard, deployer: Treasury) {
         0,
         1,
         triangleFaces(),
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(facesRes).toHaveSuccessfulTx<UploadFaceChunk>({
         from: deployer.address,
@@ -379,7 +413,7 @@ fun uploadTriangleShard(contract: OnchainRendererShard, deployer: Treasury) {
         0,
         1,
         triangleUvs(),
-        { value: ton("0.05") },
+        { value: ton("0.01") },
     );
     expect(uvsRes).toHaveSuccessfulTx<UploadFaceUvChunk>({
         from: deployer.address,
@@ -438,7 +472,7 @@ fun uploadVertexChunks(contract: OnchainRenderer, deployer: Treasury, total: uin
             index,
             total,
             vertexChunk(index),
-            { value: ton("0.05") },
+            { value: ton("0.01") },
         );
         expect(res).toHaveSuccessfulTx<UploadVertexChunk>({
             from: deployer.address,
@@ -473,7 +507,7 @@ fun uploadTextureChunks(
             index,
             total,
             textureChunk(index, total, totalBytes),
-            { value: ton("0.05") },
+            { value: ton("0.01") },
         );
         expect(res).toHaveSuccessfulTx<UploadTextureChunk>({
             from: deployer.address,

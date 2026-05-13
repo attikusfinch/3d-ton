@@ -28,6 +28,7 @@ import {
 } from '@wrappers/OnchainRendererShard.gen';
 import { getTonClient } from './ton';
 import type { Network } from './router';
+import { selectTextureChunksForShard } from './mesh';
 import type {
   CompiledMesh,
   CompiledMeshShard,
@@ -37,10 +38,11 @@ import type {
 
 export const DEFAULT_MAX_VERTICES = 100000;
 export const DEFAULT_MAX_FACES = 4096;
-export const DEFAULT_SHARD_FACES = 32;
+export const DEFAULT_SHARD_FACES = DEFAULT_MAX_FACES;
 export const DEFAULT_RENDER_ROWS = 4;
 export const DEFAULT_RENDER_POINTS = 512;
-export const MESSAGE_VALUE = toNano('0.05');
+export const DEPLOY_MESSAGE_VALUE = toNano('0.05');
+export const PAYLOAD_MESSAGE_VALUE = toNano('0.01');
 
 export interface UploadProgress {
   done: number;
@@ -118,7 +120,7 @@ export async function sendRendererPayloads(
           bounceable: true,
           testOnly: network === 'testnet',
         }),
-        amount: MESSAGE_VALUE.toString(),
+        amount: PAYLOAD_MESSAGE_VALUE.toString(),
         payload: payload.toBoc().toString('base64'),
       })),
     });
@@ -243,12 +245,16 @@ export function buildShardUploadPayloads(
     }),
   ];
 
-  if (texture) {
-    texture.chunks.forEach((data, index) => {
+  const selectedTexture = texture
+    ? selectTextureChunksForShard(texture, shard)
+    : null;
+
+  if (selectedTexture) {
+    selectedTexture.chunks.forEach(({ index, data }) => {
       payloads.push(
         OnchainRendererShard.createCellOfUploadTextureChunk({
           index: BigInt(index),
-          total: BigInt(texture.chunks.length),
+          total: BigInt(selectedTexture.totalChunks),
           data,
         }),
       );
@@ -256,9 +262,9 @@ export function buildShardUploadPayloads(
 
     payloads.push(
       OnchainRendererShard.createCellOfCommitTexture({
-        width: BigInt(texture.width),
-        height: BigInt(texture.height),
-        textureHash: texture.textureHash,
+        width: BigInt(selectedTexture.width),
+        height: BigInt(selectedTexture.height),
+        textureHash: selectedTexture.textureHash,
       }),
     );
   } else {
