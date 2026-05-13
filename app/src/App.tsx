@@ -106,6 +106,7 @@ export default function App() {
   const [renderedAt, setRenderedAt] = useState('');
   const [cameraViewId, setCameraViewId] = useState(DEFAULT_CAMERA_VIEW.id);
   const [deploySeed, setDeploySeed] = useState(makeDeploySeed);
+  const [localMeshUploaded, setLocalMeshUploaded] = useState(false);
 
   const formattedWallet = useMemo(() => {
     if (!walletAddress) return '';
@@ -165,7 +166,8 @@ export default function App() {
         testOnly: network === 'testnet',
       });
       setContractAddress(address);
-      setStatus(`Scene deployed with seed ${seed}`);
+      setLocalMeshUploaded(false);
+      setStatus(`Scene deployed with seed ${seed}. Compile and upload a mesh.`);
     });
   }
 
@@ -179,7 +181,8 @@ export default function App() {
       );
       setMesh(compiled);
       setTexture(null);
-      setStatus('Sample mesh ready');
+      setLocalMeshUploaded(false);
+      setStatus('Sample mesh ready. Click Upload, then Render.');
     });
   }
 
@@ -194,7 +197,8 @@ export default function App() {
         DEFAULT_MAX_FACES,
       );
       setMesh(compiled);
-      setStatus('OBJ mesh ready');
+      setLocalMeshUploaded(false);
+      setStatus('OBJ mesh ready. Click Upload, then Render.');
     });
   }
 
@@ -203,7 +207,8 @@ export default function App() {
     await runTask('Compiling texture', async () => {
       const compiled = await compileTextureFile(file);
       setTexture(compiled);
-      setStatus('Texture ready');
+      setLocalMeshUploaded(false);
+      setStatus('Texture ready. Upload again to commit it on-chain.');
     });
   }
 
@@ -233,6 +238,7 @@ export default function App() {
         walletBatchSize,
         setProgress,
       );
+      setLocalMeshUploaded(true);
       setStatus('Mesh committed on-chain');
     });
   }
@@ -270,7 +276,13 @@ export default function App() {
       const opened = openRenderer(network, address);
       const [vertexCount, faceCount, , , isCommitted] =
         await opened.getModelInfo();
-      if (!isCommitted) throw new Error('Contract model is not committed.');
+      if (!isCommitted) {
+        throw new Error(
+          mesh
+            ? 'This contract is empty. Sample/OBJ is only local until you click Upload.'
+            : 'This contract has no committed model. Compile and upload a mesh first.',
+        );
+      }
 
       paintEmptyCanvas(canvasRef.current, resolution);
       const totalVertices = Number(vertexCount);
@@ -537,6 +549,10 @@ export default function App() {
               <Stat label="Texture" value={texture?.sourceName ?? '-'} />
               <Stat label="Camera" value={cameraView.label} />
               <Stat
+                label="On-chain"
+                value={localMeshUploaded ? 'Committed' : 'Needs upload'}
+              />
+              <Stat
                 label="Chunks"
                 value={
                   mesh
@@ -584,6 +600,7 @@ export default function App() {
                 setError('');
                 setRenderedAt('');
                 setDeploySeed(makeDeploySeed());
+                setLocalMeshUploaded(false);
                 setStatus('Idle');
                 paintEmptyCanvas(canvasRef.current, resolution);
               }}
