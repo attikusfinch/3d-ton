@@ -138,7 +138,7 @@ export default function App() {
     try {
       await task();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(formatTaskError(err));
       setStatus('Stopped');
     } finally {
       setBusy(false);
@@ -288,11 +288,7 @@ export default function App() {
       const totalVertices = Number(vertexCount);
       const totalFaces = Number(faceCount);
 
-      if (
-        totalVertices > DEFAULT_RENDER_POINTS ||
-        totalFaces === 0 ||
-        resolution >= 256
-      ) {
+      const renderPoints = async () => {
         let frame = createFrame(resolution, resolution);
         let frameWidth: number = resolution;
         let frameHeight: number = resolution;
@@ -317,15 +313,25 @@ export default function App() {
           writePointBatch(frame, batch);
           drawFrame(canvasRef.current, frame, frameWidth, frameHeight);
         }
+      };
+
+      if (totalVertices > DEFAULT_RENDER_POINTS || totalFaces === 0) {
+        await renderPoints();
       } else {
         const frame = createFrame(resolution, resolution);
-        for (let y0 = 0; y0 < resolution; y0 += DEFAULT_RENDER_ROWS) {
-          const rows = Math.min(DEFAULT_RENDER_ROWS, resolution - y0);
-          setStatus(`Rendering rows ${y0}-${y0 + rows - 1}`);
-          const cell = await opened.getRenderRows(BigInt(y0), BigInt(rows));
-          const band = decodeRenderCell(cell);
-          writeBand(frame, band);
-          drawFrame(canvasRef.current, frame, band.width, band.height);
+        try {
+          for (let y0 = 0; y0 < resolution; y0 += DEFAULT_RENDER_ROWS) {
+            const rows = Math.min(DEFAULT_RENDER_ROWS, resolution - y0);
+            setStatus(`Rendering rows ${y0}-${y0 + rows - 1}`);
+            const cell = await opened.getRenderRows(BigInt(y0), BigInt(rows));
+            const band = decodeRenderCell(cell);
+            writeBand(frame, band);
+            drawFrame(canvasRef.current, frame, band.width, band.height);
+          }
+        } catch (err) {
+          if (!isGetMethodOutOfGas(err)) throw err;
+          setStatus('Row render exceeded TVM gas; rendering points');
+          await renderPoints();
         }
       }
 
@@ -612,6 +618,20 @@ export default function App() {
         </aside>
       </main>
     </div>
+  );
+}
+
+function formatTaskError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes('exit_code: -14')) {
+    return 'TVM get-method ran out of gas. I switched render calls to smaller chunks; refresh and try Render again.';
+  }
+  return message;
+}
+
+function isGetMethodOutOfGas(err: unknown): boolean {
+  return (err instanceof Error ? err.message : String(err)).includes(
+    'exit_code: -14',
   );
 }
 

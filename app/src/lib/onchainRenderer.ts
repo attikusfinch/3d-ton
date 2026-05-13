@@ -39,8 +39,8 @@ import type {
 export const DEFAULT_MAX_VERTICES = 100000;
 export const DEFAULT_MAX_FACES = 4096;
 export const DEFAULT_SHARD_FACES = DEFAULT_MAX_FACES;
-export const DEFAULT_RENDER_ROWS = 4;
-export const DEFAULT_RENDER_POINTS = 512;
+export const DEFAULT_RENDER_ROWS = 1;
+export const DEFAULT_RENDER_POINTS = 64;
 export const DEPLOY_MESSAGE_VALUE = toNano('0.05');
 export const PAYLOAD_MESSAGE_VALUE = toNano('0.01');
 export const TONCONNECT_SAFE_BATCH_MESSAGES = 64;
