@@ -11,6 +11,10 @@ export function toncenterApiKey(network: Network): string | undefined {
     : import.meta.env.TONCENTER_MAINNET_API_KEY;
 }
 
+export function hasToncenterApiKey(network: Network): boolean {
+  return Boolean(toncenterApiKey(network));
+}
+
 export function toncenterBaseUrl(network: Network): string {
   return network === 'testnet'
     ? 'https://testnet.toncenter.com'

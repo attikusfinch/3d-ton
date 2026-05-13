@@ -23,7 +23,12 @@ import { Address } from '@ton/core';
 import { Button } from '@/components/ui/button';
 import { NetworkDropdown } from './components/NetworkDropdown';
 import { useRouter } from './lib/router';
-import { formatAddressForNetwork, getTonClient, networkLabel } from './lib/ton';
+import {
+  formatAddressForNetwork,
+  getTonClient,
+  hasToncenterApiKey,
+  networkLabel,
+} from './lib/ton';
 import {
   compileObjToMesh,
   compileTextureFile,
@@ -59,6 +64,7 @@ import {
 } from './lib/onchainRenderer';
 
 const RESOLUTIONS = [32, 64, 128, 256, 512] as const;
+const RPC_RETRY_DELAYS = [1500, 3500, 7000];
 
 function makeDeploySeed(): number {
   const values = new Uint32Array(1);
@@ -274,8 +280,14 @@ export default function App() {
         throw new Error('Deploy or paste a contract address.');
       const address = Address.parse(contractAddress.trim());
       const opened = openRenderer(network, address);
-      const [vertexCount, faceCount, , , isCommitted] =
-        await opened.getModelInfo();
+      const renderRpc = createRenderRpcScheduler(
+        hasToncenterApiKey(network) ? 150 : 1150,
+        setStatus,
+      );
+      const [vertexCount, faceCount, , , isCommitted] = await renderRpc(
+        'Reading model info',
+        () => opened.getModelInfo(),
+      );
       if (!isCommitted) {
         throw new Error(
           mesh
@@ -299,10 +311,9 @@ export default function App() {
           start += DEFAULT_RENDER_POINTS
         ) {
           const count = Math.min(DEFAULT_RENDER_POINTS, totalVertices - start);
-          setStatus(`Rendering points ${start}-${start + count - 1}`);
-          const cell = await opened.getRenderPoints(
-            BigInt(start),
-            BigInt(count),
+          const label = `Rendering points ${start}-${start + count - 1}`;
+          const cell = await renderRpc(label, () =>
+            opened.getRenderPoints(BigInt(start), BigInt(count)),
           );
           const batch = decodeRenderPointsCell(cell);
           if (start === 0) {
@@ -322,8 +333,10 @@ export default function App() {
         try {
           for (let y0 = 0; y0 < resolution; y0 += DEFAULT_RENDER_ROWS) {
             const rows = Math.min(DEFAULT_RENDER_ROWS, resolution - y0);
-            setStatus(`Rendering rows ${y0}-${y0 + rows - 1}`);
-            const cell = await opened.getRenderRows(BigInt(y0), BigInt(rows));
+            const label = `Rendering rows ${y0}-${y0 + rows - 1}`;
+            const cell = await renderRpc(label, () =>
+              opened.getRenderRows(BigInt(y0), BigInt(rows)),
+            );
             const band = decodeRenderCell(cell);
             writeBand(frame, band);
             drawFrame(canvasRef.current, frame, band.width, band.height);
@@ -623,16 +636,77 @@ export default function App() {
 
 function formatTaskError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
+  if (isRpcRateLimit(err)) {
+    return 'Toncenter RPC rate limit. Refresh and try again, or add TONCENTER_TESTNET_API_KEY / TONCENTER_MAINNET_API_KEY to .env for faster rendering.';
+  }
   if (message.includes('exit_code: -14')) {
     return 'TVM get-method ran out of gas. I switched render calls to smaller chunks; refresh and try Render again.';
   }
   return message;
 }
 
+function createRenderRpcScheduler(
+  minDelayMs: number,
+  setStatus: (status: string) => void,
+) {
+  let nextAt = 0;
+
+  return async function callRenderRpc<T>(
+    label: string,
+    call: () => Promise<T>,
+  ): Promise<T> {
+    const waitMs = Math.max(0, nextAt - Date.now());
+    if (waitMs > 0) {
+      setStatus(`${label} (waiting RPC)`);
+      await sleep(waitMs);
+    }
+
+    nextAt = Date.now() + minDelayMs;
+    return retryRpcCall(label, call, setStatus);
+  };
+}
+
+async function retryRpcCall<T>(
+  label: string,
+  call: () => Promise<T>,
+  setStatus: (status: string) => void,
+): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      setStatus(label);
+      return await call();
+    } catch (err) {
+      if (!isRpcRateLimit(err) || attempt >= RPC_RETRY_DELAYS.length) {
+        throw err;
+      }
+      const delay = RPC_RETRY_DELAYS[attempt]!;
+      setStatus(`${label} rate-limited; retrying`);
+      await sleep(delay);
+    }
+  }
+}
+
+function isRpcRateLimit(err: unknown): boolean {
+  const value = err as {
+    message?: string;
+    status?: number;
+    response?: { status?: number };
+  };
+  return (
+    value?.status === 429 ||
+    value?.response?.status === 429 ||
+    Boolean(value?.message?.includes('429'))
+  );
+}
+
 function isGetMethodOutOfGas(err: unknown): boolean {
   return (err instanceof Error ? err.message : String(err)).includes(
     'exit_code: -14',
   );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
