@@ -3,6 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { TonConnectUIProvider, THEME } from '@tonconnect/ui-react';
 
 import { queryClient } from '../lib/ton';
+import { TONCONNECT_SAFE_BATCH_MESSAGES } from '../lib/onchainRenderer';
 
 const manifestUrl =
   'https://ton-blockchain.github.io/acton/tonconnect-manifest.json';
@@ -51,7 +52,7 @@ export function AppProviders({ children }: PropsWithChildren) {
       <TonConnectUIProvider
         manifestUrl={manifestUrl}
         walletsPreferredFeatures={{
-          sendTransaction: { minMessages: 255 },
+          sendTransaction: { minMessages: TONCONNECT_SAFE_BATCH_MESSAGES },
         }}
         uiPreferences={{
           theme: initialTheme,

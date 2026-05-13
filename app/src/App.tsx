@@ -48,6 +48,7 @@ import {
   DEFAULT_RENDER_POINTS,
   DEFAULT_RENDER_ROWS,
   DEPLOY_MESSAGE_VALUE,
+  estimateRendererPayloadBatches,
   getWalletMessageBatchSize,
   openRenderer,
   sendRendererPayloads,
@@ -209,7 +210,7 @@ export default function App() {
       );
       setProgress({
         done: 0,
-        total: Math.ceil(payloads.length / walletBatchSize),
+        total: estimateRendererPayloadBatches(payloads, walletBatchSize),
         label: 'Preparing batches',
       });
       await sendRendererPayloads(

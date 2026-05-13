@@ -43,6 +43,10 @@ export const DEFAULT_RENDER_ROWS = 4;
 export const DEFAULT_RENDER_POINTS = 512;
 export const DEPLOY_MESSAGE_VALUE = toNano('0.05');
 export const PAYLOAD_MESSAGE_VALUE = toNano('0.01');
+export const TONCONNECT_SAFE_BATCH_MESSAGES = 64;
+
+const TONCONNECT_SAFE_BATCH_BYTES = 24000;
+const TONCONNECT_MESSAGE_JSON_OVERHEAD = 220;
 
 export interface CameraView {
   id: string;
@@ -66,6 +70,11 @@ export interface UploadProgress {
   done: number;
   total: number;
   label: string;
+}
+
+interface EncodedPayload {
+  payload: string;
+  estimatedBytes: number;
 }
 
 export function createRendererContract(
@@ -118,12 +127,12 @@ export async function sendRendererPayloads(
   maxMessagesPerTransaction: number,
   onProgress: (progress: UploadProgress) => void,
 ): Promise<void> {
-  const batchSize = clampMessageBatchSize(maxMessagesPerTransaction);
-  const totalBatches = Math.ceil(payloads.length / batchSize);
+  const batches = buildPayloadBatches(payloads, maxMessagesPerTransaction);
+  const totalBatches = batches.length;
 
-  for (let i = 0; i < payloads.length; i += batchSize) {
-    const batch = payloads.slice(i, i + batchSize);
-    const batchNumber = Math.floor(i / batchSize) + 1;
+  for (let i = 0; i < batches.length; i += 1) {
+    const batch = batches[i]!;
+    const batchNumber = i + 1;
     onProgress({
       done: batchNumber - 1,
       total: totalBatches,
@@ -133,13 +142,13 @@ export async function sendRendererPayloads(
     await tonConnectUI.sendTransaction({
       validUntil: Math.floor(Date.now() / 1000) + 300,
       network: network === 'testnet' ? '-3' : '-239',
-      messages: batch.map((payload) => ({
+      messages: batch.map((item) => ({
         address: contractAddress.toString({
           bounceable: true,
           testOnly: network === 'testnet',
         }),
         amount: PAYLOAD_MESSAGE_VALUE.toString(),
-        payload: payload.toBoc().toString('base64'),
+        payload: item.payload,
       })),
     });
 
@@ -149,6 +158,13 @@ export async function sendRendererPayloads(
       label: `Batch ${batchNumber}/${totalBatches} sent`,
     });
   }
+}
+
+export function estimateRendererPayloadBatches(
+  payloads: Cell[],
+  maxMessagesPerTransaction: number,
+): number {
+  return buildPayloadBatches(payloads, maxMessagesPerTransaction).length;
 }
 
 export function getWalletMessageBatchSize(wallet: Wallet | null): number {
@@ -583,7 +599,47 @@ function getOptionalFeatures(wallet: Wallet): Feature[] | undefined {
 }
 
 function clampMessageBatchSize(value: number): number {
-  return Math.max(1, Math.min(255, Math.floor(value)));
+  return Math.max(
+    1,
+    Math.min(TONCONNECT_SAFE_BATCH_MESSAGES, Math.floor(value)),
+  );
+}
+
+function buildPayloadBatches(
+  payloads: Cell[],
+  maxMessagesPerTransaction: number,
+): EncodedPayload[][] {
+  const maxMessages = clampMessageBatchSize(maxMessagesPerTransaction);
+  const batches: EncodedPayload[][] = [];
+  let current: EncodedPayload[] = [];
+  let currentBytes = 0;
+
+  for (const payload of payloads) {
+    const encoded = payload.toBoc().toString('base64');
+    const item = {
+      payload: encoded,
+      estimatedBytes: encoded.length + TONCONNECT_MESSAGE_JSON_OVERHEAD,
+    };
+    const shouldFlush =
+      current.length > 0 &&
+      (current.length >= maxMessages ||
+        currentBytes + item.estimatedBytes > TONCONNECT_SAFE_BATCH_BYTES);
+
+    if (shouldFlush) {
+      batches.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+
+    current.push(item);
+    currentBytes += item.estimatedBytes;
+  }
+
+  if (current.length > 0) {
+    batches.push(current);
+  }
+
+  return batches;
 }
 
 function senderArgsToMessage(args: SenderArguments, network: Network) {
