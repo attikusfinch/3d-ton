@@ -71,9 +71,11 @@ import {
 
 const RESOLUTIONS = [32, 64, 128, 256, 512] as const;
 const RPC_RETRY_DELAYS = [1500, 3500, 7000];
-const MAX_RENDER_PATCH_PIXELS = 4096;
+const MAX_RENDER_PATCH_PIXELS = 1024;
+const MIN_RENDER_PATCH_PIXELS = 64;
 
 type FittedCamera = ReturnType<typeof fitCameraForView>;
+type PatchBounds = { x0: number; y0: number; width: number; height: number };
 
 function makeDeploySeed(): number {
   const values = new Uint32Array(1);
@@ -412,12 +414,13 @@ export default function App() {
 
         const frame = createFrame(resolution, resolution);
         const camera = fitCameraForView(mesh.vertices, resolution, cameraView);
-        for (let faceIndex = 0; faceIndex < totalFaces; faceIndex += 1) {
-          const bounds = faceBounds(mesh, faceIndex, camera, resolution);
-          if (!bounds) continue;
 
-          for (const patch of splitBounds(bounds, MAX_RENDER_PATCH_PIXELS)) {
-            const label = `Rendering face ${faceIndex + 1}/${totalFaces}`;
+        const renderPatch = async (
+          faceIndex: number,
+          patch: PatchBounds,
+        ): Promise<void> => {
+          const label = `Rendering face ${faceIndex + 1}/${totalFaces} ${patch.width}x${patch.height}`;
+          try {
             const cell = await renderRpc(label, () =>
               opened.getRenderFacePatch(
                 BigInt(faceIndex),
@@ -428,6 +431,28 @@ export default function App() {
               ),
             );
             writePatch(frame, decodeRenderPatchCell(cell));
+          } catch (err) {
+            const patchPixels = patch.width * patch.height;
+            if (
+              !isGetMethodOutOfGas(err) ||
+              patchPixels <= MIN_RENDER_PATCH_PIXELS ||
+              (patch.width <= 1 && patch.height <= 1)
+            ) {
+              throw err;
+            }
+
+            for (const child of splitPatch(patch)) {
+              await renderPatch(faceIndex, child);
+            }
+          }
+        };
+
+        for (let faceIndex = 0; faceIndex < totalFaces; faceIndex += 1) {
+          const bounds = faceBounds(mesh, faceIndex, camera, resolution);
+          if (!bounds) continue;
+
+          for (const patch of splitBounds(bounds, MAX_RENDER_PATCH_PIXELS)) {
+            await renderPatch(faceIndex, patch);
           }
           drawFrame(canvasRef.current, frame, resolution, resolution);
         }
@@ -441,7 +466,7 @@ export default function App() {
         } catch (err) {
           if (isGetMethodOutOfGas(err)) {
             throw new Error(
-              'Patch render exceeded TVM gas. Try a smaller resolution or fewer faces.',
+              'Patch render exceeded TVM gas even after adaptive splitting. Try a smaller resolution or fewer faces.',
             );
           }
           throw err;
@@ -1131,17 +1156,9 @@ function faceBounds(
   };
 }
 
-function splitBounds(
-  bounds: { x0: number; y0: number; width: number; height: number },
-  maxPixels: number,
-) {
+function splitBounds(bounds: PatchBounds, maxPixels: number) {
   const side = Math.max(1, Math.floor(Math.sqrt(maxPixels)));
-  const patches: Array<{
-    x0: number;
-    y0: number;
-    width: number;
-    height: number;
-  }> = [];
+  const patches: PatchBounds[] = [];
 
   for (let y = bounds.y0; y < bounds.y0 + bounds.height; y += side) {
     for (let x = bounds.x0; x < bounds.x0 + bounds.width; x += side) {
@@ -1152,6 +1169,28 @@ function splitBounds(
         height: Math.min(side, bounds.y0 + bounds.height - y),
       });
     }
+  }
+
+  return patches;
+}
+
+function splitPatch(patch: PatchBounds): PatchBounds[] {
+  const leftWidth = Math.max(1, Math.ceil(patch.width / 2));
+  const rightWidth = patch.width - leftWidth;
+  const topHeight = Math.max(1, Math.ceil(patch.height / 2));
+  const bottomHeight = patch.height - topHeight;
+  const widths = rightWidth > 0 ? [leftWidth, rightWidth] : [leftWidth];
+  const heights = bottomHeight > 0 ? [topHeight, bottomHeight] : [topHeight];
+  const patches: PatchBounds[] = [];
+  let y = patch.y0;
+
+  for (const height of heights) {
+    let x = patch.x0;
+    for (const width of widths) {
+      patches.push({ x0: x, y0: y, width, height });
+      x += width;
+    }
+    y += height;
   }
 
   return patches;
