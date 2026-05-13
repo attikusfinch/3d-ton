@@ -338,7 +338,7 @@ export default function App() {
         }
       };
 
-      if (totalVertices > DEFAULT_RENDER_POINTS || totalFaces === 0) {
+      if (totalFaces === 0) {
         await renderPoints();
       } else {
         const frame = createFrame(resolution, resolution);
