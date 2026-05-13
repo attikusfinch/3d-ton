@@ -510,12 +510,62 @@ fun pixelAt(storage: Storage, model: RendererModel, x: int, y: int): int {
 
 fun project(storage: Storage, vertex: Vertex): Point2 {
     val zoom = max(1, storage.camera.zoom);
-    val sx = (storage.canvasWidth / 2) + (((vertex.x as int) + storage.camera.tx) * zoom) / 512;
-    val sy = (storage.canvasHeight / 2) - (((vertex.y as int) + storage.camera.ty) * zoom) / 512;
+    val yawSin = sinDeg512(storage.camera.yaw as int);
+    val yawCos = cosDeg512(storage.camera.yaw as int);
+    val pitchSin = sinDeg512(storage.camera.pitch as int);
+    val pitchCos = cosDeg512(storage.camera.pitch as int);
+    val rollSin = sinDeg512(storage.camera.roll as int);
+    val rollCos = cosDeg512(storage.camera.roll as int);
+
+    val x0 = vertex.x as int;
+    val y0 = vertex.y as int;
+    val z0 = (vertex.z as int) + (storage.camera.tz as int);
+    val x1 = div512(x0 * yawCos + z0 * yawSin);
+    val z1 = div512(z0 * yawCos - x0 * yawSin);
+    val y2 = div512(y0 * pitchCos - z1 * pitchSin);
+    val x3 = div512(x1 * rollCos - y2 * rollSin);
+    val y3 = div512(x1 * rollSin + y2 * rollCos);
+    val sx = (storage.canvasWidth / 2) + (x3 + (storage.camera.tx as int)) * zoom / 512;
+    val sy = (storage.canvasHeight / 2) - (y3 + (storage.camera.ty as int)) * zoom / 512;
     return Point2 {
         x: sx,
         y: sy,
     };
+}
+
+fun sinDeg512(angle: int): int {
+    var a = normalizeDegrees(angle);
+    var sign = 1;
+    if (a < 0) {
+        sign = -1;
+        a = -a;
+    }
+    if (a > 90) {
+        a = 180 - a;
+    }
+
+    val numerator = 4 * a * (180 - a) * 512;
+    val denominator = 40500 - a * (180 - a);
+    return (sign * numerator) / denominator;
+}
+
+fun cosDeg512(angle: int): int {
+    return sinDeg512(angle + 90);
+}
+
+fun normalizeDegrees(angle: int): int {
+    var result = angle % 360;
+    while (result > 180) {
+        result = result - 360;
+    }
+    while (result < -180) {
+        result = result + 360;
+    }
+    return result;
+}
+
+fun div512(value: int): int {
+    return value / 512;
 }
 
 fun loadVertex(storage: Storage, index: int): Vertex {

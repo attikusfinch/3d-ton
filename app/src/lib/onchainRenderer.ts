@@ -44,6 +44,24 @@ export const DEFAULT_RENDER_POINTS = 512;
 export const DEPLOY_MESSAGE_VALUE = toNano('0.05');
 export const PAYLOAD_MESSAGE_VALUE = toNano('0.01');
 
+export interface CameraView {
+  id: string;
+  label: string;
+  yaw: number;
+  pitch: number;
+  roll: number;
+}
+
+export const CAMERA_VIEWS = [
+  { id: 'front', label: 'Front', yaw: 0, pitch: 0, roll: 0 },
+  { id: 'right-corner', label: 'Right Corner', yaw: 35, pitch: 18, roll: 0 },
+  { id: 'left-corner', label: 'Left Corner', yaw: -35, pitch: 18, roll: 0 },
+  { id: 'top-right', label: 'Top Right', yaw: 42, pitch: 32, roll: 0 },
+  { id: 'top-left', label: 'Top Left', yaw: -42, pitch: 32, roll: 0 },
+] satisfies CameraView[];
+
+export const DEFAULT_CAMERA_VIEW = CAMERA_VIEWS[0]!;
+
 export interface UploadProgress {
   done: number;
   total: number;
@@ -151,6 +169,7 @@ export function buildUploadPayloads(
   mesh: CompiledMesh,
   canvasSize: number,
   texture: CompiledTexture | null,
+  cameraView: CameraView = DEFAULT_CAMERA_VIEW,
 ): Cell[] {
   const payloads: Cell[] = [
     OnchainRenderer.createCellOfSetLimits({
@@ -160,7 +179,7 @@ export function buildUploadPayloads(
       maxFaces: BigInt(DEFAULT_MAX_FACES),
     }),
     OnchainRenderer.createCellOfSetCamera({
-      camera: fitCamera(mesh.vertices, canvasSize),
+      camera: fitCamera(mesh.vertices, canvasSize, cameraView),
     }),
   ];
 
@@ -228,10 +247,21 @@ export function buildUploadPayloads(
   return payloads;
 }
 
+export function buildSetCameraPayload(
+  mesh: CompiledMesh,
+  canvasSize: number,
+  cameraView: CameraView,
+): Cell {
+  return OnchainRenderer.createCellOfSetCamera({
+    camera: fitCamera(mesh.vertices, canvasSize, cameraView),
+  });
+}
+
 export function buildShardUploadPayloads(
   shard: CompiledMeshShard,
   canvasSize: number,
   texture: CompiledTexture | null,
+  cameraView: CameraView = DEFAULT_CAMERA_VIEW,
 ): Cell[] {
   const payloads: Cell[] = [
     OnchainRendererShard.createCellOfSetLimits({
@@ -241,7 +271,7 @@ export function buildShardUploadPayloads(
       maxFaces: BigInt(DEFAULT_MAX_FACES),
     }),
     OnchainRendererShard.createCellOfSetCamera({
-      camera: fitShardCamera(shard.vertices, canvasSize),
+      camera: fitShardCamera(shard.vertices, canvasSize, cameraView),
     }),
   ];
 
@@ -313,17 +343,22 @@ export function buildShardUploadPayloads(
   return payloads;
 }
 
-function fitCamera(vertices: MeshVertex[], canvasSize: number): Camera {
+function fitCamera(
+  vertices: MeshVertex[],
+  canvasSize: number,
+  cameraView: CameraView = DEFAULT_CAMERA_VIEW,
+): Camera {
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
 
   for (const vertex of vertices) {
-    minX = Math.min(minX, vertex.x);
-    minY = Math.min(minY, vertex.y);
-    maxX = Math.max(maxX, vertex.x);
-    maxY = Math.max(maxY, vertex.y);
+    const projected = rotateVertex(vertex, cameraView);
+    minX = Math.min(minX, projected.x);
+    minY = Math.min(minY, projected.y);
+    maxX = Math.max(maxX, projected.x);
+    maxY = Math.max(maxY, projected.y);
   }
 
   const spanX = Math.max(1, maxX - minX);
@@ -335,9 +370,9 @@ function fitCamera(vertices: MeshVertex[], canvasSize: number): Camera {
   );
 
   return Camera.create({
-    yaw: 0n,
-    pitch: 0n,
-    roll: 0n,
+    yaw: BigInt(clampInt16(Math.round(cameraView.yaw))),
+    pitch: BigInt(clampInt16(Math.round(cameraView.pitch))),
+    roll: BigInt(clampInt16(Math.round(cameraView.roll))),
     zoom: BigInt(Math.max(1, zoom)),
     tx: BigInt(clampInt16(-Math.round((minX + maxX) / 2))),
     ty: BigInt(clampInt16(-Math.round((minY + maxY) / 2))),
@@ -348,8 +383,9 @@ function fitCamera(vertices: MeshVertex[], canvasSize: number): Camera {
 function fitShardCamera(
   vertices: MeshVertex[],
   canvasSize: number,
+  cameraView: CameraView = DEFAULT_CAMERA_VIEW,
 ): ShardCamera {
-  const camera = fitCamera(vertices, canvasSize);
+  const camera = fitCamera(vertices, canvasSize, cameraView);
   return ShardCamera.create({
     yaw: camera.yaw,
     pitch: camera.pitch,
@@ -359,6 +395,40 @@ function fitShardCamera(
     ty: camera.ty,
     tz: camera.tz,
   });
+}
+
+function rotateVertex(vertex: MeshVertex, cameraView: CameraView): MeshVertex {
+  const yawSin = sinDeg512(cameraView.yaw);
+  const yawCos = cosDeg512(cameraView.yaw);
+  const pitchSin = sinDeg512(cameraView.pitch);
+  const pitchCos = cosDeg512(cameraView.pitch);
+  const rollSin = sinDeg512(cameraView.roll);
+  const rollCos = cosDeg512(cameraView.roll);
+
+  const x1 = Math.trunc((vertex.x * yawCos + vertex.z * yawSin) / 512);
+  const z1 = Math.trunc((vertex.z * yawCos - vertex.x * yawSin) / 512);
+  const y2 = Math.trunc((vertex.y * pitchCos - z1 * pitchSin) / 512);
+  const x3 = Math.trunc((x1 * rollCos - y2 * rollSin) / 512);
+  const y3 = Math.trunc((x1 * rollSin + y2 * rollCos) / 512);
+
+  return { x: x3, y: y3, z: z1 };
+}
+
+function sinDeg512(angle: number): number {
+  let normalized = Math.round(angle) % 360;
+  if (normalized > 180) normalized -= 360;
+  if (normalized < -180) normalized += 360;
+
+  const sign = normalized < 0 ? -1 : 1;
+  const positive = Math.abs(normalized);
+  const folded = positive > 90 ? 180 - positive : positive;
+  const numerator = 4 * folded * (180 - folded) * 512;
+  const denominator = 40500 - folded * (180 - folded);
+  return sign * Math.trunc(numerator / denominator);
+}
+
+function cosDeg512(angle: number): number {
+  return sinDeg512(angle + 90);
 }
 
 function clampInt16(value: number): number {

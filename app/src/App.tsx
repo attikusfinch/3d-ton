@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Camera as CameraIcon,
   Cuboid,
   ImageIcon,
   Moon,
@@ -37,8 +38,11 @@ import {
 } from './lib/mesh';
 import {
   buildUploadPayloads,
+  buildSetCameraPayload,
+  CAMERA_VIEWS,
   createRendererContract,
   createTonConnectSender,
+  DEFAULT_CAMERA_VIEW,
   DEFAULT_MAX_FACES,
   DEFAULT_MAX_VERTICES,
   DEFAULT_RENDER_POINTS,
@@ -90,6 +94,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [renderedAt, setRenderedAt] = useState('');
+  const [cameraViewId, setCameraViewId] = useState(DEFAULT_CAMERA_VIEW.id);
 
   const formattedWallet = useMemo(() => {
     if (!walletAddress) return '';
@@ -102,6 +107,12 @@ export default function App() {
   const walletBatchSize = useMemo(
     () => getWalletMessageBatchSize(wallet),
     [wallet],
+  );
+  const cameraView = useMemo(
+    () =>
+      CAMERA_VIEWS.find((view) => view.id === cameraViewId) ??
+      DEFAULT_CAMERA_VIEW,
+    [cameraViewId],
   );
 
   useEffect(() => {
@@ -190,7 +201,12 @@ export default function App() {
         throw new Error('Deploy or paste a contract address.');
 
       const address = Address.parse(contractAddress.trim());
-      const payloads = buildUploadPayloads(mesh, resolution, texture);
+      const payloads = buildUploadPayloads(
+        mesh,
+        resolution,
+        texture,
+        cameraView,
+      );
       setProgress({
         done: 0,
         total: Math.ceil(payloads.length / walletBatchSize),
@@ -205,6 +221,31 @@ export default function App() {
         setProgress,
       );
       setStatus('Mesh committed on-chain');
+    });
+  }
+
+  async function handleApplyCamera() {
+    await runTask('Applying camera', async () => {
+      if (!mesh) throw new Error('Compile an OBJ first.');
+      if (!contractAddress.trim())
+        throw new Error('Deploy or paste a contract address.');
+
+      const address = Address.parse(contractAddress.trim());
+      const payload = buildSetCameraPayload(mesh, resolution, cameraView);
+      setProgress({
+        done: 0,
+        total: 1,
+        label: `Applying ${cameraView.label}`,
+      });
+      await sendRendererPayloads(
+        tonConnectUI,
+        network,
+        address,
+        [payload],
+        walletBatchSize,
+        setProgress,
+      );
+      setStatus(`${cameraView.label} camera applied`);
     });
   }
 
@@ -368,6 +409,31 @@ export default function App() {
           </div>
 
           <div className="panel-block">
+            <p className="panel-label">Camera</p>
+            <div className="camera-preset-grid" aria-label="Camera view">
+              {CAMERA_VIEWS.map((view) => (
+                <button
+                  key={view.id}
+                  type="button"
+                  className={view.id === cameraView.id ? 'is-active' : ''}
+                  onClick={() => setCameraViewId(view.id)}
+                  disabled={busy}
+                >
+                  {view.label}
+                </button>
+              ))}
+            </div>
+            <Button
+              variant="secondary"
+              onClick={handleApplyCamera}
+              disabled={busy || !mesh}
+            >
+              <CameraIcon className="size-4" />
+              Apply Camera
+            </Button>
+          </div>
+
+          <div className="panel-block">
             <p className="panel-label">Mesh</p>
             <input
               ref={fileInputRef}
@@ -433,6 +499,7 @@ export default function App() {
                 value={mesh ? String(mesh.surfaceSamples) : '-'}
               />
               <Stat label="Texture" value={texture?.sourceName ?? '-'} />
+              <Stat label="Camera" value={cameraView.label} />
               <Stat
                 label="Chunks"
                 value={

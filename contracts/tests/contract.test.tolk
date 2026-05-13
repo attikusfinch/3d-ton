@@ -91,6 +91,74 @@ get fun `test render points returns projected vertex range`() {
     expect(points.loadUint(8)).toBeGreater(0);
 }
 
+get fun `test camera yaw affects point projection`() {
+    val (contract, deployer, _) = setupTest();
+
+    val upload = contract.sendUploadVertexChunk(
+        deployer.address,
+        0,
+        1,
+        depthPointVertex(),
+        { value: ton("0.01") },
+    );
+    expect(upload).toHaveSuccessfulTx<UploadVertexChunk>({
+        from: deployer.address,
+        to: contract.address,
+    });
+
+    val commit = contract.sendCommitModel(
+        deployer.address,
+        1,
+        0,
+        0x41,
+        0x42,
+        { value: ton("0.01") },
+    );
+    expect(commit).toHaveSuccessfulTx<CommitModel>({
+        from: deployer.address,
+        to: contract.address,
+    });
+
+    var front = contract.renderPoints(0, 1).beginParse();
+    front.loadUint(32);
+    front.loadUint(16);
+    front.loadUint(16);
+    front.loadUint(32);
+    front.loadUint(16);
+    front.loadUint(8);
+    var frontPoints = front.loadRef().beginParse();
+    val frontX = frontPoints.loadInt(16);
+
+    val cameraRes = contract.sendSetCamera(
+        deployer.address,
+        Camera {
+            yaw: 90,
+            pitch: 0,
+            roll: 0,
+            zoom: 512,
+            tx: 0,
+            ty: 0,
+            tz: 0,
+        },
+        { value: ton("0.01") },
+    );
+    expect(cameraRes).toHaveSuccessfulTx<SetCamera>({
+        from: deployer.address,
+        to: contract.address,
+    });
+
+    var angled = contract.renderPoints(0, 1).beginParse();
+    angled.loadUint(32);
+    angled.loadUint(16);
+    angled.loadUint(16);
+    angled.loadUint(32);
+    angled.loadUint(16);
+    angled.loadUint(8);
+    var angledPoints = angled.loadRef().beginParse();
+    val angledX = angledPoints.loadInt(16);
+    expect(angledX).toBeGreater(frontX);
+}
+
 get fun `test shard renders filled face patch`() {
     val deployer = testing.treasury("shardDeployer");
     val shard = OnchainRendererShard.fromStorage(Storage.default(deployer.address));
@@ -452,6 +520,14 @@ fun triangleUvs(): cell {
         .storeUint(255, 8)
         .storeUint(128, 8)
         .storeUint(0, 8)
+        .endCell();
+}
+
+fun depthPointVertex(): cell {
+    return beginCell()
+        .storeInt(0, 16)
+        .storeInt(0, 16)
+        .storeInt(32, 16)
         .endCell();
 }
 

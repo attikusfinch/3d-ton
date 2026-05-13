@@ -20,6 +20,11 @@ const pointBatchSize = Number(process.env.POINT_BATCH ?? 512);
 const renderMode = process.env.RENDER_MODE ?? 'points';
 const renderRows = Number(process.env.RENDER_ROWS ?? 4);
 const preloadStorage = process.env.PRELOAD_STORAGE !== '0';
+const cameraView = {
+  yaw: Number(process.env.CAMERA_YAW ?? 0),
+  pitch: Number(process.env.CAMERA_PITCH ?? 0),
+  roll: Number(process.env.CAMERA_ROLL ?? 0),
+};
 const pointRadius = Number(
   process.env.POINT_RADIUS ??
     (canvasSize >= 256 ? 2 : canvasSize >= 128 ? 1 : 0),
@@ -42,7 +47,7 @@ const mesh = await meshModule.compileObjToMesh(
   maxVertices,
   maxFaces,
 );
-const camera = fitCamera(mesh.vertices, canvasSize);
+const camera = fitCamera(mesh.vertices, canvasSize, cameraView);
 
 const blockchain = await Blockchain.create();
 const deployer = await blockchain.treasury('deployer');
@@ -231,9 +236,9 @@ function defaultStorage(wrapper, owner, mesh) {
     maxVertices: BigInt(maxVertices),
     maxFaces: BigInt(maxFaces),
     camera: wrapper.Camera.create({
-      yaw: 0n,
-      pitch: 0n,
-      roll: 0n,
+      yaw: BigInt(camera.yaw),
+      pitch: BigInt(camera.pitch),
+      roll: BigInt(camera.roll),
       zoom: BigInt(camera.zoom),
       tx: BigInt(camera.tx),
       ty: BigInt(camera.ty),
@@ -290,17 +295,18 @@ function defaultStorage(wrapper, owner, mesh) {
   };
 }
 
-function fitCamera(vertices, size) {
+function fitCamera(vertices, size, view) {
   let minX = Number.POSITIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
 
   for (const vertex of vertices) {
-    minX = Math.min(minX, vertex.x);
-    minY = Math.min(minY, vertex.y);
-    maxX = Math.max(maxX, vertex.x);
-    maxY = Math.max(maxY, vertex.y);
+    const projected = rotateVertex(vertex, view);
+    minX = Math.min(minX, projected.x);
+    minY = Math.min(minY, projected.y);
+    maxX = Math.max(maxX, projected.x);
+    maxY = Math.max(maxY, projected.y);
   }
 
   const spanX = Math.max(1, maxX - minX);
@@ -312,10 +318,48 @@ function fitCamera(vertices, size) {
   );
 
   return {
+    yaw: clampInt16(Math.round(view.yaw)),
+    pitch: clampInt16(Math.round(view.pitch)),
+    roll: clampInt16(Math.round(view.roll)),
     zoom: Math.max(1, zoom),
     tx: clampInt16(-Math.round((minX + maxX) / 2)),
     ty: clampInt16(-Math.round((minY + maxY) / 2)),
   };
+}
+
+function rotateVertex(vertex, camera) {
+  const yawSin = sinDeg512(camera.yaw);
+  const yawCos = cosDeg512(camera.yaw);
+  const pitchSin = sinDeg512(camera.pitch);
+  const pitchCos = cosDeg512(camera.pitch);
+  const rollSin = sinDeg512(camera.roll);
+  const rollCos = cosDeg512(camera.roll);
+  const z = vertex.z + (camera.tz ?? 0);
+
+  const x1 = Math.trunc((vertex.x * yawCos + z * yawSin) / 512);
+  const z1 = Math.trunc((z * yawCos - vertex.x * yawSin) / 512);
+  const y2 = Math.trunc((vertex.y * pitchCos - z1 * pitchSin) / 512);
+  const x3 = Math.trunc((x1 * rollCos - y2 * rollSin) / 512);
+  const y3 = Math.trunc((x1 * rollSin + y2 * rollCos) / 512);
+
+  return { x: x3, y: y3, z: z1 };
+}
+
+function sinDeg512(angle) {
+  let normalized = Math.round(angle) % 360;
+  if (normalized > 180) normalized -= 360;
+  if (normalized < -180) normalized += 360;
+
+  const sign = normalized < 0 ? -1 : 1;
+  const positive = Math.abs(normalized);
+  const folded = positive > 90 ? 180 - positive : positive;
+  const numerator = 4 * folded * (180 - folded) * 512;
+  const denominator = 40500 - folded * (180 - folded);
+  return sign * Math.trunc(numerator / denominator);
+}
+
+function cosDeg512(angle) {
+  return sinDeg512(angle + 90);
 }
 
 function clampInt16(value) {
