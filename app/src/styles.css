@@ -222,3 +222,274 @@ div[class*='tc-'] {
 [data-radix-popper-content-wrapper] {
   z-index: 100 !important;
 }
+
+.renderer-shell {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 20px;
+}
+
+.renderer-canvas-panel,
+.renderer-control-panel {
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--card), transparent 0%),
+      var(--card)
+    ),
+    var(--card);
+  border-radius: 8px;
+}
+
+.renderer-canvas-panel {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.renderer-control-panel {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.renderer-canvas-toolbar {
+  min-height: 72px;
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.renderer-canvas-toolbar h1 {
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+.panel-label {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  color: var(--muted-foreground);
+}
+
+.resolution-group {
+  height: 36px;
+  padding: 3px;
+  display: inline-flex;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--secondary);
+}
+
+.resolution-group button {
+  min-width: 46px;
+  height: 28px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.resolution-group button.is-active {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 1px 4px color-mix(in oklch, var(--foreground), transparent 90%);
+}
+
+.canvas-stage {
+  flex: 1;
+  min-height: 560px;
+  padding: 18px;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--border), transparent 65%) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      color-mix(in oklch, var(--border), transparent 65%) 1px,
+      transparent 1px
+    ),
+    #071018;
+  background-size: 24px 24px;
+}
+
+.canvas-stage canvas {
+  width: min(74vmin, 720px);
+  height: min(74vmin, 720px);
+  max-width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in oklch, var(--primary), white 28%);
+  border-radius: 6px;
+  image-rendering: pixelated;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.04),
+    0 18px 60px rgb(0 0 0 / 0.35);
+}
+
+.renderer-statusbar {
+  min-height: 42px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.panel-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.field-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted-foreground);
+}
+
+.text-input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  color: var(--foreground);
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  outline: none;
+}
+
+.text-input:focus {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring), transparent 78%);
+}
+
+.mesh-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mesh-stats div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+}
+
+.mesh-stats span {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted-foreground);
+}
+
+.mesh-stats strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.wallet-readout {
+  min-height: 42px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--secondary), transparent 25%);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.progress div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--primary);
+}
+
+.error-box {
+  border: 1px solid color-mix(in oklch, var(--destructive), white 20%);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in oklch, var(--destructive), transparent 88%);
+  color: var(--foreground);
+  font-size: 13px;
+}
+
+@media (max-width: 960px) {
+  .renderer-shell {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
+
+  .renderer-control-panel {
+    order: -1;
+  }
+
+  .canvas-stage {
+    min-height: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .renderer-canvas-toolbar,
+  .renderer-statusbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .renderer-canvas-toolbar h1 {
+    font-size: 17px;
+  }
+
+  .mesh-stats {
+    grid-template-columns: 1fr;
+  }
+}

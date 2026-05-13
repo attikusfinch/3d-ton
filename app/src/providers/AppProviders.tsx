@@ -50,6 +50,9 @@ export function AppProviders({ children }: PropsWithChildren) {
     <QueryClientProvider client={queryClient}>
       <TonConnectUIProvider
         manifestUrl={manifestUrl}
+        walletsPreferredFeatures={{
+          sendTransaction: { minMessages: 255 },
+        }}
         uiPreferences={{
           theme: initialTheme,
           colorsSet: { [THEME.DARK]: darkColors, [THEME.LIGHT]: lightColors },

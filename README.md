@@ -1,50 +1,62 @@
-# Empty App Template
+# TON Onchain Renderer
 
-This project includes a Vite-based React app for TON dApp development. It can
-be generated as part of an Acton project with `acton new --template empty --app`
-or as a standalone frontend with `acton init --create-dapp`.
+Acton + React MVP for a TON on-chain 3D renderer. The frontend compiles OBJ files
+to a compact fixed-point mesh, uploads that mesh in chunks, and calls
+`renderRows()` / `renderPoints()` get-methods. Pixel generation and point
+projection run in the `OnchainRenderer` contract.
 
-## Layout
+## Contract
 
-- `app/` contains the React + Vite frontend.
-- `package.json`, `tsconfig.json`, and `vite.config.ts` configure the app
-  toolchain.
-- `package-lock.json` pins the npm dependency tree for reproducible installs.
-- When generated with `acton new --template empty --app`, the Acton contract
-  sources, scripts, tests, and Tolk wrappers live under `contracts/`.
+- `contracts/src/OnchainRenderer.tolk` stores owner, limits, camera, model
+  metadata, vertex chunks, face chunks, UV chunks, and texture chunks.
+- Vertices are packed as `x:int16, y:int16, z:int16`.
+- Faces are packed as `a:uint16, b:uint16, c:uint16, color:uint8`.
+- Face UVs are packed as six `uint8` values. Textures are committed as 64x64
+  grayscale byte chunks for the MVP.
+- `renderRows(y0, rows)` returns `R3D1` header data plus an 8-bit pixel snake
+  cell chain.
+- `renderPoints(start, count)` returns `P3D1` projected point batches for large
+  models. The default cap is 100k vertices and 512 points per get-method.
+- MVP rendering covers points, wireframe triangle edges, small flat/textured
+  triangles, and integer-only math.
 
-## Install
+## Frontend
+
+- `app/src/lib/mesh.ts` parses OBJ, triangulates polygons, normalizes and
+  quantizes vertices, packs mesh/UV/texture chunks, and decodes render cells.
+- `app/src/lib/onchainRenderer.ts` uses generated Acton TypeScript wrappers for
+  deploy, payload creation, upload batches, and get-method calls.
+- `app/src/App.tsx` provides deploy, sample/OBJ/texture compile, chunk upload,
+  row rendering, point rendering, and canvas controls through TonConnect.
+
+## Capacity Notes
+
+- 100k vertices are supported as an on-chain point renderer path.
+- Triangle faces still use `uint16` vertex indices, so high-poly triangle meshes
+  above 65,535 indexed vertices need shard/worker contracts with local reindexing.
+- W5 wallets can batch up to 255 internal messages when the wallet advertises
+  that TonConnect limit; the app reads that feature and sizes upload batches.
+
+## Setup
+
+Acton should be installed in WSL/Linux. Node.js 22+ is required for the frontend.
 
 ```bash
+source $HOME/.acton/bin/env
 npm ci
 ```
 
 ## Commands
 
 ```bash
-npm run build
-npm run typecheck
-npm run fmt:check
-npm run dev
-```
-
-When this app is generated inside an Acton project, the usual Acton commands are
-available from the same directory:
-
-```bash
 acton build
 acton test
 acton check
-acton fmt --check
+acton wrapper --all
+acton wrapper --all --ts
+
+npm run typecheck
+npm run lint
+npm run build
+npm run dev
 ```
-
-## Notes
-
-- The app uses Vite, npm, shadcn-style UI primitives, and Tailwind CSS.
-- CI runs `npm run typecheck`, `npm run build`, `npm run fmt:check`, and,
-  when `Acton.toml` exists, `acton build`, `acton test`,
-  `acton check --output-format github`, and `acton fmt --check`.
-- Copy `.env.example` to a local `.env` for Toncenter keys. Both Acton CLI
-  (when this app is generated inside an Acton project) and the Vite app read
-  `TONCENTER_MAINNET_API_KEY` and `TONCENTER_TESTNET_API_KEY`; Vite allows the
-  `TONCENTER_` prefix via `envPrefix` in `vite.config.ts`.

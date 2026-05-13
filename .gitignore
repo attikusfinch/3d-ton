@@ -35,3 +35,8 @@ global.libraries.toml
 # coverage
 lcov.info
 gen/
+
+# Local render/debug artifacts
+.tmp/
+artifacts/
+test-model/
