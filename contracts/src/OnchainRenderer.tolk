@@ -265,6 +265,24 @@ get fun renderPoints(start: uint32, count: uint16): cell {
     return renderPointsFromStorage(storage, start, count);
 }
 
+get fun renderFacePatch(
+    faceIndex: uint16,
+    x0: uint16,
+    y0: uint16,
+    width: uint16,
+    height: uint16,
+): cell {
+    val storage = lazy Storage.load();
+    return renderFacePatchFromStorage(
+        storage,
+        faceIndex,
+        x0,
+        y0,
+        width,
+        height,
+    );
+}
+
 fun assertOwner(sender: address, owner: address) {
     assert (sender == owner) throw Errors.NotOwner;
 }
@@ -377,6 +395,110 @@ fun renderPointsFromStorage(storage: Storage, start: uint32, count: uint16): cel
         .storeUint(7, 8)
         .storeRef(points)
         .endCell();
+}
+
+fun renderFacePatchFromStorage(
+    storage: Storage,
+    faceIndex: uint16,
+    x0: uint16,
+    y0: uint16,
+    width: uint16,
+    height: uint16,
+): cell {
+    val model = storage.model.load();
+    assert (storage.isCommitted) throw Errors.NotCommitted;
+    assert (faceIndex < model.faceCount) throw Errors.InvalidLimits;
+    assert (width > 0) throw Errors.InvalidLimits;
+    assert (height > 0) throw Errors.InvalidLimits;
+    assert (x0 < storage.canvasWidth) throw Errors.InvalidLimits;
+    assert (y0 < storage.canvasHeight) throw Errors.InvalidLimits;
+    assert (x0 + width <= storage.canvasWidth) throw Errors.InvalidLimits;
+    assert (y0 + height <= storage.canvasHeight) throw Errors.InvalidLimits;
+    assert (width * height <= MAX_PATCH_PIXELS) throw Errors.InvalidLimits;
+
+    val face = loadFace(storage, faceIndex);
+    val a = project(storage, loadVertex(storage, face.a));
+    val b = project(storage, loadVertex(storage, face.b));
+    val c = project(storage, loadVertex(storage, face.c));
+    val assets = storage.assets.load();
+    val uv = loadFaceUvOrDefault(assets, faceIndex);
+    val pixels = buildFacePatchChain(
+        assets,
+        face,
+        uv,
+        a,
+        b,
+        c,
+        x0,
+        y0,
+        width,
+        height,
+    );
+
+    return beginCell()
+        .storeUint(PATCH_MAGIC, 32)
+        .storeUint(storage.canvasWidth, 16)
+        .storeUint(storage.canvasHeight, 16)
+        .storeUint(x0, 16)
+        .storeUint(y0, 16)
+        .storeUint(width, 16)
+        .storeUint(height, 16)
+        .storeUint(16, 8)
+        .storeRef(pixels)
+        .endCell();
+}
+
+fun buildFacePatchChain(
+    assets: RendererAssets,
+    face: Face,
+    uv: FaceUv,
+    a: Point2,
+    b: Point2,
+    c: Point2,
+    x0: uint16,
+    y0: uint16,
+    width: uint16,
+    height: uint16,
+): cell {
+    val total = width * height;
+    var chunkCount = ceilDiv(total, PATCH_PIXELS_PER_CELL);
+    var tail: cell? = null;
+
+    while (chunkCount > 0) {
+        chunkCount = chunkCount - 1;
+        val start = chunkCount * PATCH_PIXELS_PER_CELL;
+        val end = min(total, start + PATCH_PIXELS_PER_CELL);
+        var builder = beginCell();
+        var i = start;
+        while (i < end) {
+            val x = x0 + (i % width);
+            val y = y0 + (i / width);
+            var color = 0;
+            if (pointInTriangle(x, y, a, b, c)) {
+                color = samplePatchColor(
+                    assets,
+                    face,
+                    uv,
+                    x,
+                    y,
+                    a,
+                    b,
+                    c,
+                );
+            }
+            builder.storeUint(color, 16);
+            i = i + 1;
+        }
+        if (tail != null) {
+            builder.storeRef(tail!);
+        }
+        tail = builder.endCell();
+    }
+
+    if (tail == null) {
+        return createEmptyCell();
+    }
+    return tail!;
 }
 
 fun buildPointChain(storage: Storage, start: uint32, count: uint16): cell {
@@ -691,6 +813,69 @@ fun sampleFaceColor(
     return sampleTexture(assets, clampToByte(u), clampToByte(v));
 }
 
+fun samplePatchColor(
+    assets: RendererAssets,
+    face: Face,
+    uv: FaceUv,
+    x: int,
+    y: int,
+    a: Point2,
+    b: Point2,
+    c: Point2,
+): int {
+    if (!assets.isTextureCommitted) {
+        return rgb332ToRgb565(face.color);
+    }
+
+    val denom = abs(
+        edgeFunction(
+            a.x,
+            a.y,
+            b.x,
+            b.y,
+            c.x,
+            c.y,
+        ),
+    );
+    if (denom == 0) {
+        return rgb332ToRgb565(face.color);
+    }
+
+    val w0 = abs(
+        edgeFunction(
+            b.x,
+            b.y,
+            c.x,
+            c.y,
+            x,
+            y,
+        ),
+    );
+    val w1 = abs(
+        edgeFunction(
+            c.x,
+            c.y,
+            a.x,
+            a.y,
+            x,
+            y,
+        ),
+    );
+    val w2 = abs(
+        edgeFunction(
+            a.x,
+            a.y,
+            b.x,
+            b.y,
+            x,
+            y,
+        ),
+    );
+    val u = ((uv.u0 * w0) + (uv.u1 * w1) + (uv.u2 * w2)) / denom;
+    val v = ((uv.v0 * w0) + (uv.v1 * w1) + (uv.v2 * w2)) / denom;
+    return sampleTextureRgb565(assets, clampToByte(u), clampToByte(v));
+}
+
 fun sampleTexture(assets: RendererAssets, u: int, v: int): int {
     val x = min(assets.textureWidth - 1, (u * assets.textureWidth) / 256);
     val y = min(assets.textureHeight - 1, (v * assets.textureHeight) / 256);
@@ -702,8 +887,23 @@ fun sampleTexture(assets: RendererAssets, u: int, v: int): int {
     return max(1, rgb565ToRgb332(s.loadUint(16)));
 }
 
+fun sampleTextureRgb565(assets: RendererAssets, u: int, v: int): int {
+    val x = min(assets.textureWidth - 1, (u * assets.textureWidth) / 256);
+    val y = min(assets.textureHeight - 1, (v * assets.textureHeight) / 256);
+    val offset = (y * assets.textureWidth + x) * TEXTURE_BYTES_PER_TEXEL;
+    val chunkIndex = (offset / TEXTURE_BYTES_PER_CHUNK) as uint16;
+    val byteOffset = offset % TEXTURE_BYTES_PER_CHUNK;
+    var s = assets.textureChunks.mustGet(chunkIndex, Errors.InvalidCommit).beginParse();
+    s.skipBits(byteOffset * 8);
+    return max(1, s.loadUint(16));
+}
+
 fun rgb565ToRgb332(value: int): int {
     return value / 257;
+}
+
+fun rgb332ToRgb565(value: int): int {
+    return max(1, value * 257);
 }
 
 fun pointInTriangle(x: int, y: int, a: Point2, b: Point2, c: Point2): bool {

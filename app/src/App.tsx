@@ -32,13 +32,14 @@ import {
 import {
   compileObjToMesh,
   compileTextureFile,
-  decodeRenderCell,
+  decodeRenderPatchCell,
   decodeRenderPointsCell,
   rgb332ToRgb,
+  rgb565ToRgb,
   sampleObj,
   type CompiledMesh,
   type CompiledTexture,
-  type RenderBand,
+  type RenderPatch,
   type RenderPointBatch,
 } from './lib/mesh';
 import {
@@ -52,20 +53,24 @@ import {
   DEFAULT_MAX_FACES,
   DEFAULT_MAX_VERTICES,
   DEFAULT_RENDER_POINTS,
-  DEFAULT_RENDER_ROWS,
   DEPLOY_MESSAGE_VALUE,
   estimateRendererPayloadBatches,
+  fitCameraForView,
   getWalletMessageBatchSize,
   MAX_DEPLOY_SEED,
   normalizeDeploySeed,
   openRenderer,
   PAYLOAD_MESSAGE_VALUE,
+  projectMeshVertex,
   sendRendererPayloads,
   type UploadProgress,
 } from './lib/onchainRenderer';
 
 const RESOLUTIONS = [32, 64, 128, 256, 512] as const;
 const RPC_RETRY_DELAYS = [1500, 3500, 7000];
+const MAX_RENDER_PATCH_PIXELS = 4096;
+
+type FittedCamera = ReturnType<typeof fitCameraForView>;
 
 function makeDeploySeed(): number {
   const values = new Uint32Array(1);
@@ -338,25 +343,48 @@ export default function App() {
         }
       };
 
+      const renderFacePatches = async () => {
+        if (!mesh || !localMeshUploaded || mesh.faces.length < totalFaces) {
+          throw new Error(
+            'Patch render needs the committed mesh loaded locally. Click Sample/OBJ, Upload, then Render again.',
+          );
+        }
+
+        const frame = createFrame(resolution, resolution);
+        const camera = fitCameraForView(mesh.vertices, resolution, cameraView);
+        for (let faceIndex = 0; faceIndex < totalFaces; faceIndex += 1) {
+          const bounds = faceBounds(mesh, faceIndex, camera, resolution);
+          if (!bounds) continue;
+
+          for (const patch of splitBounds(bounds, MAX_RENDER_PATCH_PIXELS)) {
+            const label = `Rendering face ${faceIndex + 1}/${totalFaces}`;
+            const cell = await renderRpc(label, () =>
+              opened.getRenderFacePatch(
+                BigInt(faceIndex),
+                BigInt(patch.x0),
+                BigInt(patch.y0),
+                BigInt(patch.width),
+                BigInt(patch.height),
+              ),
+            );
+            writePatch(frame, decodeRenderPatchCell(cell));
+          }
+          drawFrame(canvasRef.current, frame, resolution, resolution);
+        }
+      };
+
       if (totalFaces === 0) {
         await renderPoints();
       } else {
-        const frame = createFrame(resolution, resolution);
         try {
-          for (let y0 = 0; y0 < resolution; y0 += DEFAULT_RENDER_ROWS) {
-            const rows = Math.min(DEFAULT_RENDER_ROWS, resolution - y0);
-            const label = `Rendering rows ${y0}-${y0 + rows - 1}`;
-            const cell = await renderRpc(label, () =>
-              opened.getRenderRows(BigInt(y0), BigInt(rows)),
-            );
-            const band = decodeRenderCell(cell);
-            writeBand(frame, band);
-            drawFrame(canvasRef.current, frame, band.width, band.height);
-          }
+          await renderFacePatches();
         } catch (err) {
-          if (!isGetMethodOutOfGas(err)) throw err;
-          setStatus('Row render exceeded TVM gas; rendering points');
-          await renderPoints();
+          if (isGetMethodOutOfGas(err)) {
+            throw new Error(
+              'Patch render exceeded TVM gas. Try a smaller resolution or fewer faces.',
+            );
+          }
+          throw err;
         }
       }
 
@@ -777,12 +805,13 @@ function createFrame(width: number, height: number): Uint8ClampedArray {
   return frame;
 }
 
-function writeBand(frame: Uint8ClampedArray, band: RenderBand) {
-  for (let row = 0; row < band.rows; row += 1) {
-    for (let x = 0; x < band.width; x += 1) {
-      const value = band.pixels[row * band.width + x] ?? 0;
-      const dst = ((band.y0 + row) * band.width + x) * 4;
-      const [r, g, b] = colorFromPixel(value);
+function writePatch(frame: Uint8ClampedArray, patch: RenderPatch) {
+  for (let row = 0; row < patch.height; row += 1) {
+    for (let x = 0; x < patch.width; x += 1) {
+      const value = patch.pixels[row * patch.width + x] ?? 0;
+      if (value === 0) continue;
+      const dst = ((patch.y0 + row) * patch.canvasWidth + patch.x0 + x) * 4;
+      const [r, g, b] = rgb565ToRgb(value);
       frame[dst] = r;
       frame[dst + 1] = g;
       frame[dst + 2] = b;
@@ -819,6 +848,66 @@ function writePointBatch(frame: Uint8ClampedArray, batch: RenderPointBatch) {
       }
     }
   }
+}
+
+function faceBounds(
+  mesh: CompiledMesh,
+  faceIndex: number,
+  camera: FittedCamera,
+  size: number,
+) {
+  const face = mesh.faces[faceIndex];
+  if (!face) return null;
+
+  const points = [face.a, face.b, face.c].map((index) =>
+    projectMeshVertex(mesh.vertices[index]!, camera, size),
+  );
+  const minX = Math.max(0, Math.min(...points.map((point) => point.x)) - 1);
+  const minY = Math.max(0, Math.min(...points.map((point) => point.y)) - 1);
+  const maxX = Math.min(
+    size - 1,
+    Math.max(...points.map((point) => point.x)) + 1,
+  );
+  const maxY = Math.min(
+    size - 1,
+    Math.max(...points.map((point) => point.y)) + 1,
+  );
+
+  if (maxX < 0 || maxY < 0 || minX >= size || minY >= size) return null;
+  if (maxX < minX || maxY < minY) return null;
+
+  return {
+    x0: minX,
+    y0: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+  };
+}
+
+function splitBounds(
+  bounds: { x0: number; y0: number; width: number; height: number },
+  maxPixels: number,
+) {
+  const side = Math.max(1, Math.floor(Math.sqrt(maxPixels)));
+  const patches: Array<{
+    x0: number;
+    y0: number;
+    width: number;
+    height: number;
+  }> = [];
+
+  for (let y = bounds.y0; y < bounds.y0 + bounds.height; y += side) {
+    for (let x = bounds.x0; x < bounds.x0 + bounds.width; x += side) {
+      patches.push({
+        x0: x,
+        y0: y,
+        width: Math.min(side, bounds.x0 + bounds.width - x),
+        height: Math.min(side, bounds.y0 + bounds.height - y),
+      });
+    }
+  }
+
+  return patches;
 }
 
 function drawFrame(

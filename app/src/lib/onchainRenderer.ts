@@ -291,6 +291,35 @@ export function buildSetCameraPayload(
   });
 }
 
+export function fitCameraForView(
+  vertices: MeshVertex[],
+  canvasSize: number,
+  cameraView: CameraView = DEFAULT_CAMERA_VIEW,
+): Camera {
+  return fitCamera(vertices, canvasSize, cameraView);
+}
+
+export function projectMeshVertex(
+  vertex: MeshVertex,
+  camera: Camera,
+  canvasSize: number,
+): { x: number; y: number } {
+  const rotated = rotateVertex(vertex, {
+    id: 'storage',
+    label: 'Storage',
+    yaw: Number(camera.yaw),
+    pitch: Number(camera.pitch),
+    roll: Number(camera.roll),
+  });
+  const zoom = Math.max(1, Number(camera.zoom));
+  const tx = Number(camera.tx);
+  const ty = Number(camera.ty);
+  return {
+    x: Math.trunc(canvasSize / 2) + Math.trunc(((rotated.x + tx) * zoom) / 512),
+    y: Math.trunc(canvasSize / 2) - Math.trunc(((rotated.y + ty) * zoom) / 512),
+  };
+}
+
 export function buildShardUploadPayloads(
   shard: CompiledMeshShard,
   canvasSize: number,

@@ -91,6 +91,22 @@ get fun `test render points returns projected vertex range`() {
     expect(points.loadUint(8)).toBeGreater(0);
 }
 
+get fun `test root renders filled face patch`() {
+    val (contract, _, _) = setupCommittedTriangle();
+
+    val rendered = contract.renderFacePatch(0, 0, 0, DEFAULT_CANVAS_WIDTH, DEFAULT_CANVAS_HEIGHT);
+    var s = rendered.beginParse();
+    expect(s.loadUint(32)).toEqual(PATCH_MAGIC);
+    expect(s.loadUint(16)).toEqual(DEFAULT_CANVAS_WIDTH);
+    expect(s.loadUint(16)).toEqual(DEFAULT_CANVAS_HEIGHT);
+    expect(s.loadUint(16)).toEqual(0);
+    expect(s.loadUint(16)).toEqual(0);
+    expect(s.loadUint(16)).toEqual(DEFAULT_CANVAS_WIDTH);
+    expect(s.loadUint(16)).toEqual(DEFAULT_CANVAS_HEIGHT);
+    expect(s.loadUint(8)).toEqual(16);
+    expect(hasNonZeroPixels(s.loadRef())).toEqual(true);
+}
+
 get fun `test camera yaw affects point projection`() {
     val (contract, deployer, _) = setupTest();
 

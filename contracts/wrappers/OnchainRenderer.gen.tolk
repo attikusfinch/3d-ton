@@ -267,3 +267,14 @@ fun OnchainRenderer.renderRows(self, y0: uint16, rows: uint16): cell {
 fun OnchainRenderer.renderPoints(self, start: uint32, count: uint16): cell {
     return net.runGetMethod(self.address, "renderPoints", [start, count]);
 }
+
+fun OnchainRenderer.renderFacePatch(
+    self,
+    faceIndex: uint16,
+    x0: uint16,
+    y0: uint16,
+    width: uint16,
+    height: uint16,
+): cell {
+    return net.runGetMethod(self.address, "renderFacePatch", [faceIndex, x0, y0, width, height]);
+}
