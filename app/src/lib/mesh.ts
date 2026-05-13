@@ -36,6 +36,17 @@ export interface CompiledMesh {
   surfaceSamples: number;
 }
 
+export interface MeshFaceFilterStats {
+  sourceVertices: number;
+  sourceFaces: number;
+  keptVertices: number;
+  keptFaces: number;
+  culledFaces: number;
+  offscreenFaces: number;
+  backfaceFaces: number;
+  degenerateFaces: number;
+}
+
 export interface CompiledTexture {
   width: number;
   height: number;
@@ -266,6 +277,101 @@ export async function compileObjToMesh(
     sourceName,
     truncatedFaces: skippedFaces,
     surfaceSamples: vertices.length - originalVertices.length,
+  };
+}
+
+export async function compactMeshToFaces(
+  mesh: CompiledMesh,
+  keptFaceIndices: number[],
+  cullCounts: {
+    offscreenFaces: number;
+    backfaceFaces: number;
+    degenerateFaces: number;
+  },
+  sourceNameSuffix: string,
+): Promise<{ mesh: CompiledMesh; stats: MeshFaceFilterStats }> {
+  if (!mesh.faces.length) {
+    return {
+      mesh,
+      stats: {
+        sourceVertices: mesh.vertices.length,
+        sourceFaces: mesh.faces.length,
+        keptVertices: mesh.vertices.length,
+        keptFaces: mesh.faces.length,
+        culledFaces: 0,
+        offscreenFaces: 0,
+        backfaceFaces: 0,
+        degenerateFaces: 0,
+      },
+    };
+  }
+
+  const localVertices: MeshVertex[] = [];
+  const localFaces: MeshFace[] = [];
+  const localUvs: MeshFaceUv[] = [];
+  const vertexMap = new Map<number, number>();
+
+  const remapVertex = (sourceIndex: number) => {
+    const existing = vertexMap.get(sourceIndex);
+    if (existing !== undefined) return existing;
+    const vertex = mesh.vertices[sourceIndex];
+    if (!vertex) return null;
+    const localIndex = localVertices.length;
+    vertexMap.set(sourceIndex, localIndex);
+    localVertices.push(vertex);
+    return localIndex;
+  };
+
+  for (const faceIndex of keptFaceIndices) {
+    const face = mesh.faces[faceIndex];
+    if (!face) continue;
+
+    const a = remapVertex(face.a);
+    const b = remapVertex(face.b);
+    const c = remapVertex(face.c);
+    if (a === null || b === null || c === null) continue;
+
+    localFaces.push({
+      a,
+      b,
+      c,
+      color: face.color,
+    });
+    localUvs.push(mesh.faceUvs[faceIndex] ?? defaultFaceUv());
+  }
+
+  const vertices = localVertices.length ? localVertices : mesh.vertices.slice();
+  const faces = localFaces.length ? localFaces : mesh.faces.slice();
+  const faceUvs = localUvs.length ? localUvs : mesh.faceUvs.slice();
+  const vertexChunks = packVertices(vertices);
+  const faceChunks = packFaces(faces);
+  const faceUvChunks = packFaceUvs(faceUvs);
+  const meshBytes = encodeMeshBytes(vertices, faces, faceUvs);
+  const culledFaces = Math.max(0, mesh.faces.length - faces.length);
+
+  return {
+    mesh: {
+      ...mesh,
+      vertices,
+      faces,
+      faceUvs,
+      vertexChunks,
+      faceChunks,
+      faceUvChunks,
+      meshHash: await sha256BigInt(meshBytes),
+      sourceName: `${mesh.sourceName}#${sourceNameSuffix}`,
+      surfaceSamples: 0,
+    },
+    stats: {
+      sourceVertices: mesh.vertices.length,
+      sourceFaces: mesh.faces.length,
+      keptVertices: vertices.length,
+      keptFaces: faces.length,
+      culledFaces,
+      offscreenFaces: cullCounts.offscreenFaces,
+      backfaceFaces: cullCounts.backfaceFaces,
+      degenerateFaces: cullCounts.degenerateFaces,
+    },
   };
 }
 

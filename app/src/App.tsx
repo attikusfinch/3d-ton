@@ -30,6 +30,7 @@ import {
   networkLabel,
 } from './lib/ton';
 import {
+  compactMeshToFaces,
   compileObjToMesh,
   compileTextureFile,
   decodeRenderPatchCell,
@@ -39,6 +40,7 @@ import {
   sampleObj,
   type CompiledMesh,
   type CompiledTexture,
+  type MeshFaceFilterStats,
   type RenderPatch,
   type RenderPointBatch,
 } from './lib/mesh';
@@ -63,6 +65,7 @@ import {
   PAYLOAD_MESSAGE_VALUE,
   projectMeshVertex,
   sendRendererPayloads,
+  type CameraView,
   type UploadProgress,
 } from './lib/onchainRenderer';
 
@@ -109,7 +112,11 @@ export default function App() {
   const [resolution, setResolution] =
     useState<(typeof RESOLUTIONS)[number]>(32);
   const [contractAddress, setContractAddress] = useState('');
+  const [sourceMesh, setSourceMesh] = useState<CompiledMesh | null>(null);
   const [mesh, setMesh] = useState<CompiledMesh | null>(null);
+  const [meshOptimization, setMeshOptimization] =
+    useState<MeshFaceFilterStats | null>(null);
+  const [optimizingMesh, setOptimizingMesh] = useState(false);
   const [texture, setTexture] = useState<CompiledTexture | null>(null);
   const [status, setStatus] = useState('Idle');
   const [error, setError] = useState('');
@@ -141,18 +148,63 @@ export default function App() {
   const uploadEstimate = useMemo(() => {
     if (!mesh) return null;
     const payloads = buildUploadPayloads(mesh, resolution, texture, cameraView);
+    const rawPayloads =
+      sourceMesh && sourceMesh !== mesh
+        ? buildUploadPayloads(sourceMesh, resolution, texture, cameraView)
+        : payloads;
     const uploadValue = PAYLOAD_MESSAGE_VALUE * BigInt(payloads.length);
+    const savedMessages = Math.max(0, rawPayloads.length - payloads.length);
     return {
       messages: payloads.length,
       batches: estimateRendererPayloadBatches(payloads, walletBatchSize),
       uploadValue,
       deployAndUploadValue: DEPLOY_MESSAGE_VALUE + uploadValue,
+      rawMessages: rawPayloads.length,
+      savedMessages,
+      savedUploadValue: PAYLOAD_MESSAGE_VALUE * BigInt(savedMessages),
     };
-  }, [cameraView, mesh, resolution, texture, walletBatchSize]);
+  }, [cameraView, mesh, resolution, sourceMesh, texture, walletBatchSize]);
 
   useEffect(() => {
     paintEmptyCanvas(canvasRef.current, resolution);
   }, [resolution]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!sourceMesh) {
+      setMesh(null);
+      setMeshOptimization(null);
+      setOptimizingMesh(false);
+      return;
+    }
+
+    setOptimizingMesh(true);
+    setLocalMeshUploaded(false);
+    void optimizeMeshForCamera(sourceMesh, resolution, cameraView)
+      .then(({ mesh: optimizedMesh, stats }) => {
+        if (cancelled) return;
+        setMesh(optimizedMesh);
+        setMeshOptimization(stats);
+        setStatus(
+          `Optimized for ${cameraView.label}: ${stats.keptFaces}/${stats.sourceFaces} faces`,
+        );
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setMesh(sourceMesh);
+        setMeshOptimization(createPassthroughOptimizationStats(sourceMesh));
+        setError(`Optimization failed: ${formatTaskError(err)}`);
+        setStatus('Optimization failed');
+      })
+      .finally(() => {
+        if (!cancelled) setOptimizingMesh(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cameraView, resolution, sourceMesh]);
 
   async function runTask(label: string, task: () => Promise<void>) {
     setBusy(true);
@@ -202,10 +254,11 @@ export default function App() {
         DEFAULT_MAX_VERTICES,
         DEFAULT_MAX_FACES,
       );
+      setSourceMesh(compiled);
       setMesh(compiled);
       setTexture(null);
       setLocalMeshUploaded(false);
-      setStatus('Sample mesh ready. Click Upload, then Render.');
+      setStatus('Sample mesh ready. Optimizing for camera.');
     });
   }
 
@@ -219,9 +272,10 @@ export default function App() {
         DEFAULT_MAX_VERTICES,
         DEFAULT_MAX_FACES,
       );
+      setSourceMesh(compiled);
       setMesh(compiled);
       setLocalMeshUploaded(false);
-      setStatus('OBJ mesh ready. Click Upload, then Render.');
+      setStatus('OBJ mesh ready. Optimizing for camera.');
     });
   }
 
@@ -238,6 +292,7 @@ export default function App() {
   async function handleUpload() {
     await runTask('Uploading mesh', async () => {
       if (!mesh) throw new Error('Compile an OBJ first.');
+      if (optimizingMesh) throw new Error('Wait for camera optimization.');
       if (!contractAddress.trim())
         throw new Error('Deploy or paste a contract address.');
 
@@ -269,6 +324,11 @@ export default function App() {
   async function handleApplyCamera() {
     await runTask('Applying camera', async () => {
       if (!mesh) throw new Error('Compile an OBJ first.');
+      if (!localMeshUploaded) {
+        throw new Error(
+          'Camera changes the optimized mesh. Click Upload to commit this camera view.',
+        );
+      }
       if (!contractAddress.trim())
         throw new Error('Deploy or paste a contract address.');
 
@@ -533,7 +593,7 @@ export default function App() {
             <Button
               variant="secondary"
               onClick={handleApplyCamera}
-              disabled={busy || !mesh}
+              disabled={busy || !mesh || optimizingMesh || !localMeshUploaded}
             >
               <CameraIcon className="size-4" />
               Apply Camera
@@ -577,24 +637,51 @@ export default function App() {
                 <ImageIcon className="size-4" />
                 Texture
               </Button>
-              <Button onClick={handleUpload} disabled={busy || !mesh}>
+              <Button
+                onClick={handleUpload}
+                disabled={busy || !mesh || optimizingMesh}
+              >
                 <Wallet className="size-4" />
                 Upload
               </Button>
-              <Button variant="outline" onClick={handleRender} disabled={busy}>
+              <Button
+                variant="outline"
+                onClick={handleRender}
+                disabled={busy || optimizingMesh}
+              >
                 <Play className="size-4" />
                 Render
               </Button>
             </div>
 
             <div className="mesh-stats">
-              <Stat label="Source" value={mesh?.sourceName ?? '-'} />
+              <Stat label="Source" value={sourceMesh?.sourceName ?? '-'} />
               <Stat
-                label="Vertices"
+                label="Raw V"
+                value={
+                  meshOptimization
+                    ? String(meshOptimization.sourceVertices)
+                    : sourceMesh
+                      ? String(sourceMesh.vertices.length)
+                      : '-'
+                }
+              />
+              <Stat
+                label="Upload V"
                 value={mesh ? String(mesh.vertices.length) : '-'}
               />
               <Stat
-                label="Faces"
+                label="Raw F"
+                value={
+                  meshOptimization
+                    ? String(meshOptimization.sourceFaces)
+                    : sourceMesh
+                      ? String(sourceMesh.faces.length)
+                      : '-'
+                }
+              />
+              <Stat
+                label="Upload F"
                 value={mesh ? String(mesh.faces.length) : '-'}
               />
               <Stat
@@ -603,13 +690,41 @@ export default function App() {
               />
               <Stat
                 label="Samples"
-                value={mesh ? String(mesh.surfaceSamples) : '-'}
+                value={sourceMesh ? String(sourceMesh.surfaceSamples) : '-'}
               />
               <Stat label="Texture" value={texture?.sourceName ?? '-'} />
               <Stat label="Camera" value={cameraView.label} />
               <Stat
                 label="On-chain"
-                value={localMeshUploaded ? 'Committed' : 'Needs upload'}
+                value={
+                  optimizingMesh
+                    ? 'Optimizing'
+                    : localMeshUploaded
+                      ? 'Committed'
+                      : 'Needs upload'
+                }
+              />
+              <Stat
+                label="Culled F"
+                value={
+                  meshOptimization ? String(meshOptimization.culledFaces) : '-'
+                }
+              />
+              <Stat
+                label="Backfaces"
+                value={
+                  meshOptimization
+                    ? String(meshOptimization.backfaceFaces)
+                    : '-'
+                }
+              />
+              <Stat
+                label="Offscreen"
+                value={
+                  meshOptimization
+                    ? String(meshOptimization.offscreenFaces)
+                    : '-'
+                }
               />
               <Stat
                 label="Chunks"
@@ -626,12 +741,18 @@ export default function App() {
               />
               <Stat
                 label="Skipped"
-                value={mesh ? String(mesh.truncatedFaces) : '-'}
+                value={sourceMesh ? String(sourceMesh.truncatedFaces) : '-'}
               />
               <Stat label="Batch" value={`${walletBatchSize}`} />
               <Stat
                 label="Messages"
                 value={uploadEstimate ? String(uploadEstimate.messages) : '-'}
+              />
+              <Stat
+                label="Saved msg"
+                value={
+                  uploadEstimate ? String(uploadEstimate.savedMessages) : '-'
+                }
               />
               <Stat
                 label="Tx est."
@@ -650,6 +771,14 @@ export default function App() {
                 value={
                   uploadEstimate
                     ? `~${formatTon(uploadEstimate.deployAndUploadValue)}`
+                    : '-'
+                }
+              />
+              <Stat
+                label="Saved TON"
+                value={
+                  uploadEstimate
+                    ? `~${formatTon(uploadEstimate.savedUploadValue)}`
                     : '-'
                 }
               />
@@ -677,7 +806,9 @@ export default function App() {
               variant="ghost"
               className="w-full justify-start"
               onClick={() => {
+                setSourceMesh(null);
                 setMesh(null);
+                setMeshOptimization(null);
                 setTexture(null);
                 setProgress(null);
                 setError('');
@@ -696,6 +827,122 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+async function optimizeMeshForCamera(
+  sourceMesh: CompiledMesh,
+  resolution: number,
+  cameraView: CameraView,
+): Promise<{ mesh: CompiledMesh; stats: MeshFaceFilterStats }> {
+  if (!sourceMesh.faces.length) {
+    return {
+      mesh: sourceMesh,
+      stats: createPassthroughOptimizationStats(sourceMesh),
+    };
+  }
+
+  const camera = fitCameraForView(sourceMesh.vertices, resolution, cameraView);
+  const positiveFaces: number[] = [];
+  const negativeFaces: number[] = [];
+  let positiveArea = 0;
+  let negativeArea = 0;
+  let offscreenFaces = 0;
+  let degenerateFaces = 0;
+
+  for (let faceIndex = 0; faceIndex < sourceMesh.faces.length; faceIndex += 1) {
+    const face = sourceMesh.faces[faceIndex];
+    if (!face) continue;
+
+    const a = projectMeshVertex(
+      sourceMesh.vertices[face.a]!,
+      camera,
+      resolution,
+    );
+    const b = projectMeshVertex(
+      sourceMesh.vertices[face.b]!,
+      camera,
+      resolution,
+    );
+    const c = projectMeshVertex(
+      sourceMesh.vertices[face.c]!,
+      camera,
+      resolution,
+    );
+    const area = signedFaceArea(a, b, c);
+
+    if (Math.abs(area) < 1) {
+      degenerateFaces += 1;
+      continue;
+    }
+
+    if (isFaceOutsideViewport([a, b, c], resolution)) {
+      offscreenFaces += 1;
+      continue;
+    }
+
+    if (area > 0) {
+      positiveFaces.push(faceIndex);
+      positiveArea += area;
+    } else {
+      negativeFaces.push(faceIndex);
+      negativeArea += Math.abs(area);
+    }
+  }
+
+  const keptFaceIndices =
+    positiveFaces.length === 0
+      ? negativeFaces
+      : negativeFaces.length === 0 || positiveArea >= negativeArea
+        ? positiveFaces
+        : negativeFaces;
+  const backfaceFaces =
+    positiveFaces.length + negativeFaces.length - keptFaceIndices.length;
+
+  return compactMeshToFaces(
+    sourceMesh,
+    keptFaceIndices,
+    {
+      offscreenFaces,
+      backfaceFaces,
+      degenerateFaces,
+    },
+    `${cameraView.id}-cull`,
+  );
+}
+
+function createPassthroughOptimizationStats(
+  mesh: CompiledMesh,
+): MeshFaceFilterStats {
+  return {
+    sourceVertices: mesh.vertices.length,
+    sourceFaces: mesh.faces.length,
+    keptVertices: mesh.vertices.length,
+    keptFaces: mesh.faces.length,
+    culledFaces: 0,
+    offscreenFaces: 0,
+    backfaceFaces: 0,
+    degenerateFaces: 0,
+  };
+}
+
+function signedFaceArea(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  c: { x: number; y: number },
+): number {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+function isFaceOutsideViewport(
+  points: Array<{ x: number; y: number }>,
+  size: number,
+): boolean {
+  const minX = Math.min(...points.map((point) => point.x));
+  const minY = Math.min(...points.map((point) => point.y));
+  const maxX = Math.max(...points.map((point) => point.x));
+  const maxY = Math.max(...points.map((point) => point.y));
+
+  return maxX < 0 || maxY < 0 || minX >= size || minY >= size;
 }
 
 function formatTaskError(err: unknown): string {
