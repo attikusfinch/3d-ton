@@ -345,7 +345,7 @@ function writePatch(frame, patch) {
       const value = patch.pixels[row * patch.width + x] ?? 0;
       if (value === 0) continue;
       const dst = ((patch.y0 + row) * patch.canvasWidth + patch.x0 + x) * 4;
-      const [r, g, b] = palette(value);
+      const [r, g, b] = colorFromPixel(value);
       frame[dst] = r;
       frame[dst + 1] = g;
       frame[dst + 2] = b;
@@ -354,12 +354,19 @@ function writePatch(frame, patch) {
   }
 }
 
-function palette(value) {
+function colorFromPixel(value) {
   if (value === 0) return [9, 14, 20];
+  return rgb332ToRgb(value);
+}
+
+function rgb332ToRgb(value) {
+  const r = (value >> 5) & 0x07;
+  const g = (value >> 2) & 0x07;
+  const b = value & 0x03;
   return [
-    Math.min(255, 40 + value),
-    Math.min(255, 108 + Math.floor(value * 0.5)),
-    Math.min(255, 150 + Math.floor(value * 0.35)),
+    Math.round((r * 255) / 7),
+    Math.round((g * 255) / 7),
+    Math.round((b * 255) / 3),
   ];
 }
 

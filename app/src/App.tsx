@@ -28,6 +28,7 @@ import {
   compileTextureFile,
   decodeRenderCell,
   decodeRenderPointsCell,
+  rgb332ToRgb,
   sampleObj,
   type CompiledMesh,
   type CompiledTexture,
@@ -519,7 +520,7 @@ function writeBand(frame: Uint8ClampedArray, band: RenderBand) {
     for (let x = 0; x < band.width; x += 1) {
       const value = band.pixels[row * band.width + x] ?? 0;
       const dst = ((band.y0 + row) * band.width + x) * 4;
-      const [r, g, b] = palette(value);
+      const [r, g, b] = colorFromPixel(value);
       frame[dst] = r;
       frame[dst + 1] = g;
       frame[dst + 2] = b;
@@ -540,7 +541,7 @@ function writePointBatch(frame: Uint8ClampedArray, batch: RenderPointBatch) {
       continue;
     }
 
-    const [r, g, b] = palette(point.color);
+    const [r, g, b] = colorFromPixel(point.color);
     for (let dy = -radius; dy <= radius; dy += 1) {
       for (let dx = -radius; dx <= radius; dx += 1) {
         const x = point.x + dx;
@@ -579,11 +580,7 @@ function paintEmptyCanvas(canvas: HTMLCanvasElement | null, size: number) {
   drawFrame(canvas, createFrame(size, size), size, size);
 }
 
-function palette(value: number): [number, number, number] {
+function colorFromPixel(value: number): [number, number, number] {
   if (value === 0) return [9, 14, 20];
-  return [
-    Math.min(255, 42 + value),
-    Math.min(255, 120 + Math.floor(value * 0.45)),
-    Math.min(255, 170 + Math.floor(value * 0.28)),
-  ];
+  return rgb332ToRgb(value);
 }

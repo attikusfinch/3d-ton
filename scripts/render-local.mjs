@@ -345,7 +345,7 @@ function writePointBatch(frame, batch) {
       continue;
     }
 
-    const [r, g, b] = palette(point.color);
+    const [r, g, b] = colorFromPixel(point.color);
     for (let dy = -pointRadius; dy <= pointRadius; dy += 1) {
       for (let dx = -pointRadius; dx <= pointRadius; dx += 1) {
         const x = point.x + dx;
@@ -369,7 +369,7 @@ function writeBand(frame, band) {
     for (let x = 0; x < band.width; x += 1) {
       const value = band.pixels[row * band.width + x] ?? 0;
       const dst = ((band.y0 + row) * band.width + x) * 4;
-      const [r, g, b] = palette(value);
+      const [r, g, b] = colorFromPixel(value);
       frame[dst] = r;
       frame[dst + 1] = g;
       frame[dst + 2] = b;
@@ -378,12 +378,19 @@ function writeBand(frame, band) {
   }
 }
 
-function palette(value) {
+function colorFromPixel(value) {
   if (value === 0) return [9, 14, 20];
+  return rgb332ToRgb(value);
+}
+
+function rgb332ToRgb(value) {
+  const r = (value >> 5) & 0x07;
+  const g = (value >> 2) & 0x07;
+  const b = value & 0x03;
   return [
-    Math.min(255, 42 + value),
-    Math.min(255, 120 + Math.floor(value * 0.45)),
-    Math.min(255, 170 + Math.floor(value * 0.28)),
+    Math.round((r * 255) / 7),
+    Math.round((g * 255) / 7),
+    Math.round((b * 255) / 3),
   ];
 }
 

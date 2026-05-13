@@ -42,6 +42,7 @@ export interface CompiledTexture {
   chunks: Cell[];
   textureHash: bigint;
   sourceName: string;
+  format: 'rgb332';
 }
 
 export interface CompiledMeshShard {
@@ -227,7 +228,7 @@ export async function compileObjToMesh(
       a,
       b,
       c,
-      color: 96 + ((faces.length * 37) % 144),
+      color: makeFaceColor(faces.length),
     });
     faceUvs.push(makeFaceUv(triangle, rawUvs, rawVertices));
   }
@@ -358,7 +359,7 @@ export async function compileTextureFromRgba(
   sourceName: string,
 ): Promise<CompiledTexture> {
   const size = TEXTURE_SIZE;
-  const gray = new Uint8Array(size * size);
+  const texels = new Uint8Array(size * size);
 
   for (let y = 0; y < size; y += 1) {
     const sourceY = Math.min(
@@ -371,10 +372,10 @@ export async function compileTextureFromRgba(
         Math.floor(((x + 0.5) * sourceWidth) / size),
       );
       const src = (sourceY * sourceWidth + sourceX) * 4;
-      gray[y * size + x] = Math.round(
-        (rgba[src] ?? 0) * 0.299 +
-          (rgba[src + 1] ?? 0) * 0.587 +
-          (rgba[src + 2] ?? 0) * 0.114,
+      texels[y * size + x] = rgbaToRgb332(
+        rgba[src] ?? 0,
+        rgba[src + 1] ?? 0,
+        rgba[src + 2] ?? 0,
       );
     }
   }
@@ -382,10 +383,22 @@ export async function compileTextureFromRgba(
   return {
     width: size,
     height: size,
-    chunks: packTexture(gray),
-    textureHash: await sha256BigInt(gray),
+    chunks: packTexture(texels),
+    textureHash: await sha256BigInt(texels),
     sourceName,
+    format: 'rgb332',
   };
+}
+
+export function rgb332ToRgb(value: number): [number, number, number] {
+  const r = (value >> 5) & 0x07;
+  const g = (value >> 2) & 0x07;
+  const b = value & 0x03;
+  return [
+    Math.round((r * 255) / 7),
+    Math.round((g * 255) / 7),
+    Math.round((b * 255) / 3),
+  ];
 }
 
 export function decodeRenderCell(cell: Cell): RenderBand {
@@ -622,6 +635,21 @@ function defaultFaceUv(): MeshFaceUv {
     u2: 128,
     v2: 0,
   };
+}
+
+function makeFaceColor(index: number): number {
+  return rgbaToRgb332(
+    120 + ((index * 23) % 96),
+    140 + ((index * 41) % 88),
+    180 + ((index * 17) % 64),
+  );
+}
+
+function rgbaToRgb332(red: number, green: number, blue: number): number {
+  const r = Math.max(0, Math.min(7, Math.round((red / 255) * 7)));
+  const g = Math.max(0, Math.min(7, Math.round((green / 255) * 7)));
+  const b = Math.max(0, Math.min(3, Math.round((blue / 255) * 3)));
+  return (r << 5) | (g << 2) | b;
 }
 
 function packVertices(vertices: MeshVertex[]): Cell[] {
