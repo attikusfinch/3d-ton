@@ -59,6 +59,7 @@ import {
   MAX_DEPLOY_SEED,
   normalizeDeploySeed,
   openRenderer,
+  PAYLOAD_MESSAGE_VALUE,
   sendRendererPayloads,
   type UploadProgress,
 } from './lib/onchainRenderer';
@@ -132,6 +133,17 @@ export default function App() {
       DEFAULT_CAMERA_VIEW,
     [cameraViewId],
   );
+  const uploadEstimate = useMemo(() => {
+    if (!mesh) return null;
+    const payloads = buildUploadPayloads(mesh, resolution, texture, cameraView);
+    const uploadValue = PAYLOAD_MESSAGE_VALUE * BigInt(payloads.length);
+    return {
+      messages: payloads.length,
+      batches: estimateRendererPayloadBatches(payloads, walletBatchSize),
+      uploadValue,
+      deployAndUploadValue: DEPLOY_MESSAGE_VALUE + uploadValue,
+    };
+  }, [cameraView, mesh, resolution, texture, walletBatchSize]);
 
   useEffect(() => {
     paintEmptyCanvas(canvasRef.current, resolution);
@@ -234,7 +246,7 @@ export default function App() {
       setProgress({
         done: 0,
         total: estimateRendererPayloadBatches(payloads, walletBatchSize),
-        label: 'Preparing batches',
+        label: `Preparing ${payloads.length} messages`,
       });
       await sendRendererPayloads(
         tonConnectUI,
@@ -589,6 +601,30 @@ export default function App() {
                 value={mesh ? String(mesh.truncatedFaces) : '-'}
               />
               <Stat label="Batch" value={`${walletBatchSize}`} />
+              <Stat
+                label="Messages"
+                value={uploadEstimate ? String(uploadEstimate.messages) : '-'}
+              />
+              <Stat
+                label="Tx est."
+                value={uploadEstimate ? String(uploadEstimate.batches) : '-'}
+              />
+              <Stat
+                label="Upload TON"
+                value={
+                  uploadEstimate
+                    ? `~${formatTon(uploadEstimate.uploadValue)}`
+                    : '-'
+                }
+              />
+              <Stat
+                label="Deploy+upload"
+                value={
+                  uploadEstimate
+                    ? `~${formatTon(uploadEstimate.deployAndUploadValue)}`
+                    : '-'
+                }
+              />
             </div>
           </div>
 
@@ -707,6 +743,17 @@ function isGetMethodOutOfGas(err: unknown): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function formatTon(nano: bigint): string {
+  const scale = 1_000_000_000n;
+  const whole = nano / scale;
+  const fraction = (nano % scale)
+    .toString()
+    .padStart(9, '0')
+    .slice(0, 3)
+    .replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : `${whole}`;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
