@@ -43,6 +43,7 @@ import {
   createRendererContract,
   createTonConnectSender,
   DEFAULT_CAMERA_VIEW,
+  DEFAULT_DEPLOY_SEED,
   DEFAULT_MAX_FACES,
   DEFAULT_MAX_VERTICES,
   DEFAULT_RENDER_POINTS,
@@ -50,12 +51,20 @@ import {
   DEPLOY_MESSAGE_VALUE,
   estimateRendererPayloadBatches,
   getWalletMessageBatchSize,
+  MAX_DEPLOY_SEED,
+  normalizeDeploySeed,
   openRenderer,
   sendRendererPayloads,
   type UploadProgress,
 } from './lib/onchainRenderer';
 
 const RESOLUTIONS = [32, 64, 128, 256, 512] as const;
+
+function makeDeploySeed(): number {
+  const values = new Uint32Array(1);
+  crypto.getRandomValues(values);
+  return values[0] ?? DEFAULT_DEPLOY_SEED;
+}
 
 function useTheme() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -96,6 +105,7 @@ export default function App() {
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [renderedAt, setRenderedAt] = useState('');
   const [cameraViewId, setCameraViewId] = useState(DEFAULT_CAMERA_VIEW.id);
+  const [deploySeed, setDeploySeed] = useState(makeDeploySeed);
 
   const formattedWallet = useMemo(() => {
     if (!walletAddress) return '';
@@ -139,7 +149,9 @@ export default function App() {
       if (!walletAddress) throw new Error('Connect a wallet first.');
 
       const owner = Address.parse(walletAddress);
-      const contract = createRendererContract(owner, resolution);
+      const seed = normalizeDeploySeed(deploySeed);
+      setDeploySeed(seed);
+      const contract = createRendererContract(owner, resolution, seed);
       const sender = createTonConnectSender(
         tonConnectUI,
         walletAddress,
@@ -153,7 +165,7 @@ export default function App() {
         testOnly: network === 'testnet',
       });
       setContractAddress(address);
-      setStatus('Scene deployed');
+      setStatus(`Scene deployed with seed ${seed}`);
     });
   }
 
@@ -389,6 +401,15 @@ export default function App() {
               </Button>
               <Button
                 variant="secondary"
+                onClick={() => setDeploySeed(makeDeploySeed())}
+                disabled={busy}
+                title="Generate deploy seed"
+              >
+                <RotateCcw className="size-4" />
+                Seed
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={() => void handleSample()}
                 disabled={busy}
               >
@@ -406,6 +427,20 @@ export default function App() {
               onChange={(event) => setContractAddress(event.target.value)}
               placeholder="EQ..."
               spellCheck={false}
+            />
+            <label className="field-label" htmlFor="deploy-seed">
+              Seed
+            </label>
+            <input
+              id="deploy-seed"
+              className="text-input"
+              type="number"
+              min={0}
+              max={MAX_DEPLOY_SEED}
+              value={deploySeed}
+              onChange={(event) =>
+                setDeploySeed(normalizeDeploySeed(event.target.valueAsNumber))
+              }
             />
           </div>
 
@@ -548,6 +583,7 @@ export default function App() {
                 setProgress(null);
                 setError('');
                 setRenderedAt('');
+                setDeploySeed(makeDeploySeed());
                 setStatus('Idle');
                 paintEmptyCanvas(canvasRef.current, resolution);
               }}

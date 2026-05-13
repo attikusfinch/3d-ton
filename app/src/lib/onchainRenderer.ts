@@ -44,6 +44,8 @@ export const DEFAULT_RENDER_POINTS = 512;
 export const DEPLOY_MESSAGE_VALUE = toNano('0.05');
 export const PAYLOAD_MESSAGE_VALUE = toNano('0.01');
 export const TONCONNECT_SAFE_BATCH_MESSAGES = 64;
+export const DEFAULT_DEPLOY_SEED = 1;
+export const MAX_DEPLOY_SEED = 0xffffffff;
 
 const TONCONNECT_SAFE_BATCH_BYTES = 24000;
 const TONCONNECT_MESSAGE_JSON_OVERHEAD = 220;
@@ -80,8 +82,11 @@ interface EncodedPayload {
 export function createRendererContract(
   owner: Address,
   canvasSize: number,
+  seed = DEFAULT_DEPLOY_SEED,
 ): OnchainRenderer {
-  return OnchainRenderer.fromStorage(defaultStorage(owner, canvasSize));
+  return OnchainRenderer.fromStorage(
+    defaultStorage(owner, canvasSize, normalizeDeploySeed(seed)),
+  );
 }
 
 export function createRendererShardContract(
@@ -100,6 +105,11 @@ export function openRenderer(network: Network, address: Address) {
 
 export function openRendererShard(network: Network, address: Address) {
   return getTonClient(network).open(OnchainRendererShard.fromAddress(address));
+}
+
+export function normalizeDeploySeed(seed: number): number {
+  if (!Number.isFinite(seed)) return DEFAULT_DEPLOY_SEED;
+  return Math.max(0, Math.min(MAX_DEPLOY_SEED, Math.floor(seed)));
 }
 
 export function createTonConnectSender(
@@ -451,11 +461,15 @@ function clampInt16(value: number): number {
   return Math.max(-32768, Math.min(32767, value));
 }
 
-function defaultStorage(owner: Address, canvasSize: number): Storage {
+function defaultStorage(
+  owner: Address,
+  canvasSize: number,
+  seed: number,
+): Storage {
   return {
     $: 'Storage',
     owner,
-    seed: 1n,
+    seed: BigInt(normalizeDeploySeed(seed)),
     canvasWidth: BigInt(canvasSize),
     canvasHeight: BigInt(canvasSize),
     maxVertices: BigInt(DEFAULT_MAX_VERTICES),
