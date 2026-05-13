@@ -177,7 +177,10 @@ fun onInternalMessage(in: InMessage) {
             assertTextureLimits(msg.width, msg.height);
             assertUploaded(
                 assets.textureChunksUploaded,
-                ceilDiv(msg.width * msg.height, TEXTURE_BYTES_PER_CHUNK),
+                ceilDiv(
+                    msg.width * msg.height * TEXTURE_BYTES_PER_TEXEL,
+                    TEXTURE_BYTES_PER_CHUNK,
+                ),
             );
 
             assets.textureWidth = msg.width;
@@ -389,7 +392,7 @@ fun renderFacePatchFromStorage(
         .storeUint(y0, 16)
         .storeUint(width, 16)
         .storeUint(height, 16)
-        .storeUint(8, 8)
+        .storeUint(16, 8)
         .storeRef(pixels)
         .endCell();
 }
@@ -407,13 +410,13 @@ fun buildFacePatchChain(
     height: uint16,
 ): cell {
     val total = width * height;
-    var chunkCount = ceilDiv(total, PIXELS_PER_CELL);
+    var chunkCount = ceilDiv(total, PATCH_PIXELS_PER_CELL);
     var tail: cell? = null;
 
     while (chunkCount > 0) {
         chunkCount = chunkCount - 1;
-        val start = chunkCount * PIXELS_PER_CELL;
-        val end = min(total, start + PIXELS_PER_CELL);
+        val start = chunkCount * PATCH_PIXELS_PER_CELL;
+        val end = min(total, start + PATCH_PIXELS_PER_CELL);
         var builder = beginCell();
         var i = start;
         while (i < end) {
@@ -432,7 +435,7 @@ fun buildFacePatchChain(
                     c,
                 );
             }
-            builder.storeUint(color, 8);
+            builder.storeUint(color, 16);
             i = i + 1;
         }
         if (tail != null) {
@@ -519,7 +522,7 @@ fun sampleFaceColor(
     c: Point2,
 ): int {
     if (!assets.isTextureCommitted) {
-        return max(1, face.color);
+        return rgb332ToRgb565(face.color);
     }
 
     val denom = abs(
@@ -533,7 +536,7 @@ fun sampleFaceColor(
         ),
     );
     if (denom == 0) {
-        return max(1, face.color);
+        return rgb332ToRgb565(face.color);
     }
 
     val w0 = abs(
@@ -574,12 +577,16 @@ fun sampleFaceColor(
 fun sampleTexture(assets: RendererAssets, u: int, v: int): int {
     val x = min(assets.textureWidth - 1, (u * assets.textureWidth) / 256);
     val y = min(assets.textureHeight - 1, (v * assets.textureHeight) / 256);
-    val offset = y * assets.textureWidth + x;
+    val offset = (y * assets.textureWidth + x) * TEXTURE_BYTES_PER_TEXEL;
     val chunkIndex = (offset / TEXTURE_BYTES_PER_CHUNK) as uint16;
     val byteOffset = offset % TEXTURE_BYTES_PER_CHUNK;
     var s = assets.textureChunks.mustGet(chunkIndex, Errors.InvalidCommit).beginParse();
     s.skipBits(byteOffset * 8);
-    return max(1, s.loadUint(8));
+    return max(1, s.loadUint(16));
+}
+
+fun rgb332ToRgb565(value: int): int {
+    return max(1, value * 257);
 }
 
 fun pointInTriangle(x: int, y: int, a: Point2, b: Point2, c: Point2): bool {

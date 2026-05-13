@@ -356,17 +356,17 @@ function writePatch(frame, patch) {
 
 function colorFromPixel(value) {
   if (value === 0) return [9, 14, 20];
-  return rgb332ToRgb(value);
+  return rgb565ToRgb(value);
 }
 
-function rgb332ToRgb(value) {
-  const r = (value >> 5) & 0x07;
-  const g = (value >> 2) & 0x07;
-  const b = value & 0x03;
+function rgb565ToRgb(value) {
+  const r = (value >> 11) & 0x1f;
+  const g = (value >> 5) & 0x3f;
+  const b = value & 0x1f;
   return [
-    Math.round((r * 255) / 7),
-    Math.round((g * 255) / 7),
-    Math.round((b * 255) / 3),
+    Math.round((r * 255) / 31),
+    Math.round((g * 255) / 63),
+    Math.round((b * 255) / 31),
   ];
 }
 

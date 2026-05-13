@@ -122,7 +122,7 @@ get fun `test shard renders filled face patch`() {
     expect(s.loadUint(16)).toEqual(0);
     expect(s.loadUint(16)).toEqual(DEFAULT_CANVAS_WIDTH);
     expect(s.loadUint(16)).toEqual(DEFAULT_CANVAS_HEIGHT);
-    expect(s.loadUint(8)).toEqual(8);
+    expect(s.loadUint(8)).toEqual(16);
     expect(hasNonZeroPixels(s.loadRef())).toEqual(true);
 }
 
@@ -160,14 +160,14 @@ get fun `test texture chunks can be committed`() {
     expect(committed).toEqual(true);
 }
 
-get fun `test 64x64 texture chunks can be committed`() {
+get fun `test 128x128 rgb565 texture chunks can be committed`() {
     val (contract, deployer, _) = setupTest();
 
-    uploadTextureChunks(contract, deployer, 35);
+    uploadTextureChunks(contract, deployer, 274, 32768);
     val commit = contract.sendCommitTexture(
         deployer.address,
-        64,
-        64,
+        128,
+        128,
         0x04,
         { value: ton("0.05") },
     );
@@ -177,8 +177,8 @@ get fun `test 64x64 texture chunks can be committed`() {
     });
 
     val (width, height, hash, committed) = contract.textureInfo();
-    expect(width).toEqual(64);
-    expect(height).toEqual(64);
+    expect(width).toEqual(128);
+    expect(height).toEqual(128);
     expect(hash).toEqual(0x04);
     expect(committed).toEqual(true);
 }
@@ -423,10 +423,10 @@ fun triangleUvs(): cell {
 
 fun texture2x2(): cell {
     return beginCell()
-        .storeUint(16, 8)
-        .storeUint(96, 8)
-        .storeUint(180, 8)
-        .storeUint(255, 8)
+        .storeUint(0xffe0, 16)
+        .storeUint(0x001f, 16)
+        .storeUint(0xf800, 16)
+        .storeUint(0xffff, 16)
         .endCell();
 }
 
@@ -460,14 +460,19 @@ fun vertexChunk(seed: int): cell {
     return b.endCell();
 }
 
-fun uploadTextureChunks(contract: OnchainRenderer, deployer: Treasury, total: uint16) {
+fun uploadTextureChunks(
+    contract: OnchainRenderer,
+    deployer: Treasury,
+    total: uint16,
+    totalBytes: int,
+) {
     var index = 0;
     while (index < total) {
         val res = contract.sendUploadTextureChunk(
             deployer.address,
             index,
             total,
-            textureChunk(index, total),
+            textureChunk(index, total, totalBytes),
             { value: ton("0.05") },
         );
         expect(res).toHaveSuccessfulTx<UploadTextureChunk>({
@@ -478,10 +483,10 @@ fun uploadTextureChunks(contract: OnchainRenderer, deployer: Treasury, total: ui
     }
 }
 
-fun textureChunk(index: int, total: int): cell {
+fun textureChunk(index: int, total: int, totalBytes: int): cell {
     var bytes = TEXTURE_BYTES_PER_CHUNK;
     if (index == total - 1) {
-        bytes = MAX_TEXTURE_PIXELS % TEXTURE_BYTES_PER_CHUNK;
+        bytes = totalBytes - (index * TEXTURE_BYTES_PER_CHUNK);
         if (bytes == 0) {
             bytes = TEXTURE_BYTES_PER_CHUNK;
         }

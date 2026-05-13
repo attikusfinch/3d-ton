@@ -176,7 +176,10 @@ fun onInternalMessage(in: InMessage) {
             assertTextureLimits(msg.width, msg.height);
             assertUploaded(
                 assets.textureChunksUploaded,
-                ceilDiv(msg.width * msg.height, TEXTURE_BYTES_PER_CHUNK),
+                ceilDiv(
+                    msg.width * msg.height * TEXTURE_BYTES_PER_TEXEL,
+                    TEXTURE_BYTES_PER_CHUNK,
+                ),
             );
 
             assets.textureWidth = msg.width;
@@ -642,12 +645,16 @@ fun sampleFaceColor(
 fun sampleTexture(assets: RendererAssets, u: int, v: int): int {
     val x = min(assets.textureWidth - 1, (u * assets.textureWidth) / 256);
     val y = min(assets.textureHeight - 1, (v * assets.textureHeight) / 256);
-    val offset = y * assets.textureWidth + x;
+    val offset = (y * assets.textureWidth + x) * TEXTURE_BYTES_PER_TEXEL;
     val chunkIndex = (offset / TEXTURE_BYTES_PER_CHUNK) as uint16;
     val byteOffset = offset % TEXTURE_BYTES_PER_CHUNK;
     var s = assets.textureChunks.mustGet(chunkIndex, Errors.InvalidCommit).beginParse();
     s.skipBits(byteOffset * 8);
-    return max(1, s.loadUint(8));
+    return max(1, rgb565ToRgb332(s.loadUint(16)));
+}
+
+fun rgb565ToRgb332(value: int): int {
+    return value / 257;
 }
 
 fun pointInTriangle(x: int, y: int, a: Point2, b: Point2, c: Point2): bool {

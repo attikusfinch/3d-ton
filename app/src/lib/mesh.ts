@@ -42,7 +42,7 @@ export interface CompiledTexture {
   chunks: Cell[];
   textureHash: bigint;
   sourceName: string;
-  format: 'rgb332';
+  format: 'rgb565';
 }
 
 export interface CompiledMeshShard {
@@ -92,18 +92,19 @@ export interface RenderPatch {
   width: number;
   height: number;
   bpp: number;
-  pixels: Uint8Array;
+  pixels: Uint16Array;
 }
 
 const VERTICES_PER_CHUNK = 16;
 const FACES_PER_CHUNK = 16;
 const FACE_UVS_PER_CHUNK = 16;
 const TEXTURE_BYTES_PER_CHUNK = 120;
+const TEXTURE_BYTES_PER_TEXEL = 2;
 const RENDER_MAGIC = 0x52334431;
 const POINTS_MAGIC = 0x50334431;
 const PATCH_MAGIC = 0x54334431;
 const QUANTIZED_RADIUS = 4096;
-const TEXTURE_SIZE = 64;
+const TEXTURE_SIZE = 128;
 const MAX_FACE_INDEX = 65535;
 
 const SAMPLE_OBJ = `# cube
@@ -359,7 +360,7 @@ export async function compileTextureFromRgba(
   sourceName: string,
 ): Promise<CompiledTexture> {
   const size = TEXTURE_SIZE;
-  const texels = new Uint8Array(size * size);
+  const texels = new Uint8Array(size * size * TEXTURE_BYTES_PER_TEXEL);
 
   for (let y = 0; y < size; y += 1) {
     const sourceY = Math.min(
@@ -372,11 +373,14 @@ export async function compileTextureFromRgba(
         Math.floor(((x + 0.5) * sourceWidth) / size),
       );
       const src = (sourceY * sourceWidth + sourceX) * 4;
-      texels[y * size + x] = rgbaToRgb332(
+      const value = rgbaToRgb565(
         rgba[src] ?? 0,
         rgba[src + 1] ?? 0,
         rgba[src + 2] ?? 0,
       );
+      const dst = (y * size + x) * TEXTURE_BYTES_PER_TEXEL;
+      texels[dst] = value >> 8;
+      texels[dst + 1] = value & 0xff;
     }
   }
 
@@ -386,7 +390,7 @@ export async function compileTextureFromRgba(
     chunks: packTexture(texels),
     textureHash: await sha256BigInt(texels),
     sourceName,
-    format: 'rgb332',
+    format: 'rgb565',
   };
 }
 
@@ -398,6 +402,17 @@ export function rgb332ToRgb(value: number): [number, number, number] {
     Math.round((r * 255) / 7),
     Math.round((g * 255) / 7),
     Math.round((b * 255) / 3),
+  ];
+}
+
+export function rgb565ToRgb(value: number): [number, number, number] {
+  const r = (value >> 11) & 0x1f;
+  const g = (value >> 5) & 0x3f;
+  const b = value & 0x1f;
+  return [
+    Math.round((r * 255) / 31),
+    Math.round((g * 255) / 63),
+    Math.round((b * 255) / 31),
   ];
 }
 
@@ -468,10 +483,10 @@ export function decodeRenderPatchCell(cell: Cell): RenderPatch {
   const width = s.loadUint(16);
   const height = s.loadUint(16);
   const bpp = s.loadUint(8);
-  if (bpp !== 8) throw new Error(`Unsupported patch bpp: ${bpp}`);
+  if (bpp !== 16) throw new Error(`Unsupported patch bpp: ${bpp}`);
 
-  const pixels = new Uint8Array(width * height);
-  readByteChain(s.loadRef(), pixels);
+  const pixels = new Uint16Array(width * height);
+  readUint16Chain(s.loadRef(), pixels);
 
   return { canvasWidth, canvasHeight, x0, y0, width, height, bpp, pixels };
 }
@@ -645,6 +660,13 @@ function makeFaceColor(index: number): number {
   );
 }
 
+function rgbaToRgb565(red: number, green: number, blue: number): number {
+  const r = Math.max(0, Math.min(31, Math.round((red / 255) * 31)));
+  const g = Math.max(0, Math.min(63, Math.round((green / 255) * 63)));
+  const b = Math.max(0, Math.min(31, Math.round((blue / 255) * 31)));
+  return (r << 11) | (g << 5) | b;
+}
+
 function rgbaToRgb332(red: number, green: number, blue: number): number {
   const r = Math.max(0, Math.min(7, Math.round((red / 255) * 7)));
   const g = Math.max(0, Math.min(7, Math.round((green / 255) * 7)));
@@ -718,6 +740,20 @@ function readByteChain(root: Cell, out: Uint8Array) {
     const chunk = next.beginParse();
     while (chunk.remainingBits >= 8 && offset < out.length) {
       out[offset] = chunk.loadUint(8);
+      offset += 1;
+    }
+    next = chunk.remainingRefs > 0 ? chunk.loadRef() : null;
+  }
+}
+
+function readUint16Chain(root: Cell, out: Uint16Array) {
+  let offset = 0;
+  let next: Cell | null = root;
+
+  while (next && offset < out.length) {
+    const chunk = next.beginParse();
+    while (chunk.remainingBits >= 16 && offset < out.length) {
+      out[offset] = chunk.loadUint(16);
       offset += 1;
     }
     next = chunk.remainingRefs > 0 ? chunk.loadRef() : null;
