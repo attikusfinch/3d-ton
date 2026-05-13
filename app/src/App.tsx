@@ -76,9 +76,11 @@ const RESOLUTIONS = [32, 64, 128, 256, 512] as const;
 const RPC_RETRY_DELAYS = [1500, 3500, 7000];
 const MAX_RENDER_PATCH_PIXELS = 1024;
 const MIN_RENDER_PATCH_PIXELS = 64;
+const AMBIGUOUS_WINDING_RATIO = 0.65;
 
 type FittedCamera = ReturnType<typeof fitCameraForView>;
 type PatchBounds = { x0: number; y0: number; width: number; height: number };
+type FaceCandidate = { index: number; depth: number };
 
 function makeDeploySeed(): number {
   const values = new Uint32Array(1);
@@ -955,8 +957,8 @@ async function optimizeMeshForCamera(
   }
 
   const camera = fitCameraForView(sourceMesh.vertices, resolution, cameraView);
-  const positiveFaces: number[] = [];
-  const negativeFaces: number[] = [];
+  const positiveFaces: FaceCandidate[] = [];
+  const negativeFaces: FaceCandidate[] = [];
   let positiveArea = 0;
   let negativeArea = 0;
   let offscreenFaces = 0;
@@ -993,21 +995,34 @@ async function optimizeMeshForCamera(
       continue;
     }
 
+    const depth = (a.z + b.z + c.z) / 3;
     if (area > 0) {
-      positiveFaces.push(faceIndex);
+      positiveFaces.push({ index: faceIndex, depth });
       positiveArea += area;
     } else {
-      negativeFaces.push(faceIndex);
+      negativeFaces.push({ index: faceIndex, depth });
       negativeArea += Math.abs(area);
     }
   }
 
-  const keptFaceIndices =
+  const windingRatio =
+    positiveArea > 0 && negativeArea > 0
+      ? Math.min(positiveArea, negativeArea) /
+        Math.max(positiveArea, negativeArea)
+      : 0;
+  const keptFaces =
     positiveFaces.length === 0
       ? negativeFaces
-      : negativeFaces.length === 0 || positiveArea >= negativeArea
+      : negativeFaces.length === 0 ||
+          (windingRatio < AMBIGUOUS_WINDING_RATIO &&
+            positiveArea >= negativeArea)
         ? positiveFaces
-        : negativeFaces;
+        : windingRatio < AMBIGUOUS_WINDING_RATIO
+          ? negativeFaces
+          : [...positiveFaces, ...negativeFaces];
+  const keptFaceIndices = keptFaces
+    .sort((a, b) => a.depth - b.depth)
+    .map((face) => face.index);
   const backfaceFaces =
     positiveFaces.length + negativeFaces.length - keptFaceIndices.length;
 

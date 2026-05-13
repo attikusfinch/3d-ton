@@ -401,7 +401,7 @@ export function projectMeshVertex(
   vertex: MeshVertex,
   camera: Camera,
   canvasSize: number,
-): { x: number; y: number } {
+): { x: number; y: number; z: number } {
   const rotated = rotateVertex(vertex, {
     id: 'storage',
     label: 'Storage',
@@ -415,6 +415,7 @@ export function projectMeshVertex(
   return {
     x: Math.trunc(canvasSize / 2) + Math.trunc(((rotated.x + tx) * zoom) / 512),
     y: Math.trunc(canvasSize / 2) - Math.trunc(((rotated.y + ty) * zoom) / 512),
+    z: rotated.z,
   };
 }
 
