@@ -49,6 +49,14 @@ export const MAX_DEPLOY_SEED = 0xffffffff;
 
 const TONCONNECT_SAFE_BATCH_BYTES = 24000;
 const TONCONNECT_MESSAGE_JSON_OVERHEAD = 220;
+const OP_COMMIT_MODEL = 0x76544303;
+const OP_SET_LIMITS = 0x76544306;
+const OP_COMMIT_TEXTURE = 0x7654430a;
+const SEQUENTIAL_UPLOAD_OPS = new Set([
+  OP_COMMIT_MODEL,
+  OP_SET_LIMITS,
+  OP_COMMIT_TEXTURE,
+]);
 
 export interface CameraView {
   id: string;
@@ -629,11 +637,23 @@ function buildPayloadBatches(
   let currentBytes = 0;
 
   for (const payload of payloads) {
+    const isSequential = SEQUENTIAL_UPLOAD_OPS.has(readPayloadOpcode(payload));
     const encoded = payload.toBoc().toString('base64');
     const item = {
       payload: encoded,
       estimatedBytes: encoded.length + TONCONNECT_MESSAGE_JSON_OVERHEAD,
     };
+
+    if (isSequential) {
+      if (current.length > 0) {
+        batches.push(current);
+        current = [];
+        currentBytes = 0;
+      }
+      batches.push([item]);
+      continue;
+    }
+
     const shouldFlush =
       current.length > 0 &&
       (current.length >= maxMessages ||
@@ -654,6 +674,12 @@ function buildPayloadBatches(
   }
 
   return batches;
+}
+
+function readPayloadOpcode(payload: Cell): number {
+  const slice = payload.beginParse();
+  if (slice.remainingBits < 32) return -1;
+  return slice.loadUint(32);
 }
 
 function senderArgsToMessage(args: SenderArguments, network: Network) {
