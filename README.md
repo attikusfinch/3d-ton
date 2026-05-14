@@ -5,6 +5,8 @@ to a compact fixed-point mesh, uploads that mesh in chunks, and calls
 `renderRows()` / `renderPoints()` get-methods. Pixel generation and point
 projection run in the `OnchainRenderer` contract.
 
+See [`SPEC.md`](SPEC.md) for the full system and contract spec.
+
 ## Contract
 
 - `contracts/src/OnchainRenderer.tolk` stores owner, limits, camera, model
