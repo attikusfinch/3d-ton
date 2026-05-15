@@ -540,11 +540,7 @@ fun triangleUvs(): cell {
 }
 
 fun depthPointVertex(): cell {
-    return beginCell()
-        .storeInt(0, 16)
-        .storeInt(0, 16)
-        .storeInt(32, 16)
-        .endCell();
+    return beginCell().storeInt(0, 16).storeInt(0, 16).storeInt(32, 16).endCell();
 }
 
 fun texture2x2(): cell {
